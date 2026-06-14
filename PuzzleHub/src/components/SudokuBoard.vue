@@ -1,10 +1,10 @@
 <template>
   <div class="sudoku-board">
     <div
-      v-for="(row, rowIndex) in gameStore.board"
+      v-for="(row, rowIndex) in structuredBoard"
       :key="rowIndex"
       class="sudoku-row"
-      :class="{ 'border-bottom': (rowIndex + 1) % 3 === 0 && rowIndex !== 9 }"
+      :class="{ 'border-bottom': (rowIndex + 1) % 3 === 0 && rowIndex < 8 }"
     >
       <SudokuCell
         v-for="(cell, colIndex) in row"
@@ -14,20 +14,40 @@
         :modelValue="cell.value"
         :isFixed="cell.isOriginal"
         @update:modelValue="handleCellUpdate"
-        :class="{ 'border-right': (colIndex + 1) % 3 === 0 && colIndex !== 9 }"
+        :class="{ 'border-right': (colIndex + 1) % 3 === 0 && colIndex < 8 }"
       />
     </div>
   </div>
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import SudokuCell from './SudokuCell.vue'
 import { useGameStore } from '../stores/game'
 
 const gameStore = useGameStore()
 
+const structuredBoard = computed(() => {
+  const board = []
+  for (let i = 0; i < 9; i++) {
+    const row = []
+    for (let j = 0; j < 9; j++) {
+      const index = i * 9 + j
+      row.push({
+        value: gameStore.board[index] === 0 ? null : gameStore.board[index],
+        isOriginal: gameStore.fixedCells.includes(index),
+      })
+    }
+    board.push(row)
+  }
+  return board
+})
+
 const handleCellUpdate = ({ row, col, value }) => {
-  gameStore.updateCell(row, col, value)
+  const index = row * 9 + col
+  // The value from the input is a string, so we need to parse it
+  const parsedValue = value === null ? 0 : parseInt(value, 10)
+  gameStore.updateCell(index, parsedValue)
 }
 </script>
 
