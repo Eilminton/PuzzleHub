@@ -40,26 +40,32 @@ export const useGameStore = defineStore('game', () => {
 
     isLoading.value = true
     try {
+      // Clean up any existing channels before starting
+      if (realtimeChannel.value) supabase.removeChannel(realtimeChannel.value)
+      if (lobbyChannel.value) supabase.removeChannel(lobbyChannel.value)
+      realtimeChannel.value = null
+      lobbyChannel.value = null
+
       // 1. Prüfe auf bereits aktive Sessions
       console.log('📡 [GameStore] Prüfe auf existierende aktive Sessions...')
       let { data: myActiveSession, error: myActiveError } = await supabase
         .from('sudoku_sessions')
         .select('*')
         .or(`host_id.eq.${authStore.user.id},partner_id.eq.${authStore.user.id}`)
-        .eq('session_status', 'active')
+        .in('session_status', ['active', 'waiting'])
         .maybeSingle()
 
       if (myActiveError) throw myActiveError
 
       if (myActiveSession) {
-        console.log('✅ [GameStore] Aktive Session gefunden! ID:', myActiveSession.id)
+        console.log('✅ [GameStore] Aktive oder wartende Session gefunden! ID:', myActiveSession.id)
         loadSessionData(myActiveSession)
-        gameStatus.value = 'active'
+        gameStatus.value = myActiveSession.session_status
         return
       }
 
       // 2. Prüfe auf wartende Sessions von anderen Spielern
-      console.log('📡 [GameStore] Keine aktive Session. Suche nach wartenden Spielen...')
+      console.log('📡 [GameStore] Keine eigene Session. Suche nach fremden wartenden Spielen...')
       let { data: waitingSession, error: waitingError } = await supabase
         .from('sudoku_sessions')
         .select('*')
@@ -92,6 +98,13 @@ export const useGameStore = defineStore('game', () => {
   async function startNewGame(difficulty = 'easy') {
     console.log(`🎮 [GameStore] startNewGame() getriggert. Schwierigkeit: ${difficulty}`)
     isLoading.value = true
+    // Unsubscribe from lobby when creating a game to avoid joining own game
+    if (lobbyChannel.value) {
+        console.log('🚪 [Lobby] Temporär von Lobby abgemeldet, um eigenes Spiel zu erstellen.')
+        supabase.removeChannel(lobbyChannel.value)
+        lobbyChannel.value = null
+    }
+
     try {
       const puzzleResponse = await fetchMockSudokuPuzzle(difficulty)
 
@@ -101,11 +114,6 @@ export const useGameStore = defineStore('game', () => {
       const newFixedCells = []
       newBoard.forEach((val, index) => {
         if (val !== 0) newFixedCells.push(index)
-      })
-
-      console.log('📡 [GameStore] Sende neue Session an Supabase...', {
-        host_id: authStore.user.id,
-        boardPreview: newBoard.slice(0, 5),
       })
 
       const { data, error } = await supabase
@@ -121,10 +129,7 @@ export const useGameStore = defineStore('game', () => {
         .select()
         .single()
 
-      if (error) {
-        console.error('❌ [GameStore] Fehler beim Insert der neuen Session:', error)
-        throw error
-      }
+      if (error) throw error
 
       console.log('🎉 [GameStore] Neue Session erfolgreich in DB erstellt! ID:', data.id)
       loadSessionData(data)
@@ -140,10 +145,14 @@ export const useGameStore = defineStore('game', () => {
   async function joinGame(sessionId) {
     console.log(`🤝 [GameStore] joinGame() aufgerufen für Session ID: ${sessionId}`)
     isLoading.value = true
+    // Unsubscribe from lobby when joining a game
+    if (lobbyChannel.value) {
+        console.log('🚪 [Lobby] Von Lobby abgemeldet, da Spiel beigetreten.')
+        supabase.removeChannel(lobbyChannel.value)
+        lobbyChannel.value = null
+    }
+
     try {
-      console.log(
-        `📡 [GameStore] Sende Update-Befehl an Supabase: Partner ID ${authStore.user.id} eintippen...`,
-      )
       const { data, error } = await supabase
         .from('sudoku_sessions')
         .update({
@@ -155,10 +164,7 @@ export const useGameStore = defineStore('game', () => {
         .select()
         .single()
 
-      if (error) {
-        console.error('❌ [GameStore] Supabase hat das Update beim Beitreten verweigert:', error)
-        throw error
-      }
+      if (error) throw error
 
       console.log('🥳 [GameStore] Erfolgreich der Session beigetreten! Daten geladen.')
       loadSessionData(data)
@@ -172,53 +178,33 @@ export const useGameStore = defineStore('game', () => {
   }
 
   async function updateCell(index, value) {
-    if (!session.value || !gameId.value) {
-      console.warn('⚠️ [GameStore] updateCell() ignoriert: Keine aktive Session vorhanden.')
-      return
-    }
-    if (fixedCells.value.includes(index)) {
-      console.warn(`⚠️ [GameStore] Zelle ${index} ist fixiert und darf nicht geändert werden.`)
-      return
-    }
+    if (!session.value || !gameId.value) return
+    if (fixedCells.value.includes(index)) return
 
-    console.log(`✍️ [GameStore] Update Zelle Index ${index} -> Wert: ${value}`)
     const newBoard = [...board.value]
     newBoard[index] = value
 
     try {
-      const { error } = await supabase
-        .from('sudoku_sessions')
-        .update({ board: newBoard })
-        .eq('id', gameId.value)
-
-      if (error) throw error
+      await supabase.from('sudoku_sessions').update({ board: newBoard }).eq('id', gameId.value)
     } catch (err) {
       console.error('❌ [GameStore] Fehler beim Senden des Zell-Updates:', err.message)
     }
   }
 
   async function endGame() {
-    if (!session.value || !gameId.value) {
-      console.warn('⚠️ [GameStore] endGame() ignoriert: Keine aktive Session vorhanden.')
-      return
-    }
-
+    if (!session.value || !gameId.value) return
     console.log(`🏁 [GameStore] Beende Spiel mit Session ID: ${gameId.value}`)
-    try {
-      await supabase
+    const { error } = await supabase
         .from('sudoku_sessions')
         .update({ session_status: 'finished' })
         .eq('id', gameId.value)
-
-      resetStore()
-    } catch (err) {
-      console.error('❌ [GameStore] Fehler beim Beenden des Spiels:', err.message)
-    }
+    
+    if (error) console.error('❌ [GameStore] Fehler beim Beenden des Spiels:', error.message)
+    
+    // Reset state and re-initialize to listen for new games
+    resetStore()
   }
 
-  // ==========================================
-  // REALTIME SUBSCRIPTIONS & HELPERS
-  // ==========================================
   function loadSessionData(supabaseSession) {
     console.log('📦 [GameStore] Lade Session-Daten in den lokalen State...', supabaseSession)
     session.value = supabaseSession
@@ -227,18 +213,24 @@ export const useGameStore = defineStore('game', () => {
     solution.value = supabaseSession.solution || []
     isPartnerOnline.value = supabaseSession.partner_online || false
 
+    // Subscribe to changes for the current game
     subscribeToGameChanges(supabaseSession.id)
   }
 
   function subscribeToLobby() {
-    if (lobbyChannel.value) return
+    if (lobbyChannel.value) {
+      console.log('ℹ️ [Lobby] Subscription ist bereits aktiv.')
+      return
+    }
 
+    console.log('🔌 [Lobby] Starte neue Subscription für die Lobby...')
     lobbyChannel.value = supabase
       .channel('public:sudoku_lobby')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'sudoku_sessions' },
         async (payload) => {
+          console.log('📬 [Lobby] Eingehendes Event:', payload)
           if (
             payload.new.session_status === 'waiting' &&
             payload.new.host_id !== authStore.user.id
@@ -247,24 +239,28 @@ export const useGameStore = defineStore('game', () => {
               '⚡ [Lobby] Neues Spiel live entdeckt! Trete automatisch bei:',
               payload.new.id,
             )
-
-            if (lobbyChannel.value) supabase.removeChannel(lobbyChannel.value)
-            lobbyChannel.value = null
-
             await joinGame(payload.new.id)
+          } else {
+            console.log('⏭️ [Lobby] Event ignoriert (eigenes Spiel oder nicht "waiting").')
           }
         },
       )
-      .subscribe()
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ [Lobby] Erfolgreich für die Lobby angemeldet!')
+        } else {
+          console.log(`[Lobby] Status: ${status}`, err || '')
+        }
+      })
   }
 
   function subscribeToGameChanges(sessionId) {
-    console.log(`🔌 [GameStore] Starte Realtime-Subscription für Session ${sessionId}`)
     if (realtimeChannel.value) {
-      console.log('🔄 [GameStore] Alter Realtime-Kanal geschlossen.')
+      console.log('🔄 [GameStore] Alter Realtime-Kanal wird entfernt.')
       supabase.removeChannel(realtimeChannel.value)
     }
 
+    console.log(`🔌 [GameStore] Starte Realtime-Subscription für Session ${sessionId}`)
     realtimeChannel.value = supabase
       .channel(`sudoku_session:${sessionId}`)
       .on(
@@ -281,21 +277,25 @@ export const useGameStore = defineStore('game', () => {
           board.value = payload.new.board
           gameStatus.value = payload.new.session_status
           isPartnerOnline.value = payload.new.partner_online || false
+
+          if (payload.new.session_status === 'finished') {
+              console.log("🏁 Partner hat das Spiel beendet.")
+              resetStore()
+          }
         },
       )
-      .subscribe((status) => {
-        console.log(`📡 [GameStore] Realtime Status gewechselt zu: ${status}`)
-        if (status === 'SUBSCRIBED') updatePartnerOnlineStatus(true)
-        if (status === 'CLOSED') updatePartnerOnlineStatus(false)
+      .subscribe((status, err) => {
+          if (status === 'SUBSCRIBED') {
+            console.log(`[Game] Subscription zu Session ${sessionId} erfolgreich.`)
+            updatePartnerOnlineStatus(true)
+          } else {
+            console.log(`[Game] Subscription Status: ${status}`, err || '')
+          }
       })
   }
 
   async function updatePartnerOnlineStatus(isOnline) {
-    if (!session.value || !authStore.user) return
-    if (authStore.user.id !== session.value.partner_id) {
-      console.log('ℹ️ [GameStore] Bin Host, überspringe "partner_online" Status-Update.')
-      return
-    }
+    if (!session.value || !authStore.user || authStore.user.id === session.value.host_id) return
 
     console.log(`📡 [GameStore] Setze partner_online auf: ${isOnline}`)
     await supabase
@@ -315,8 +315,12 @@ export const useGameStore = defineStore('game', () => {
     fixedCells.value = []
     solution.value = Array(81).fill(0)
     gameStatus.value = 'idle'
+    // Nach dem Reset wird die App dank `onMounted` in HomeView neu initialisiert
+    // und `init()` aufgerufen, was bei Bedarf die Lobby-Subscription neu startet.
+    init()
   }
 
+  // Helper for mock data
   async function fetchMockSudokuPuzzle(difficulty) {
     return Promise.resolve({
       difficulty: difficulty,
