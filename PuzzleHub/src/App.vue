@@ -1,18 +1,32 @@
 <template>
-  <header class="app-header">
-    <h1>🧩 Multiplayer Sudoku</h1>
-    <nav>
-      <RouterLink to="/">Startseite</RouterLink>
-    </nav>
-  </header>
-
-  <main class="app-content">
+  <div id="app-container">
+    <header v-if="authStore.user" class="app-header">
+      <h1>PuzzleHub</h1>
+      <nav>
+        <button @click="handleLogout" class="logout-btn">Abmelden</button>
+      </nav>
+    </header>
     <RouterView />
-  </main>
+  </div>
 </template>
 
+<script setup>
+import { RouterView } from 'vue-router'
+import { useAuthStore } from './stores/auth'
+
+const authStore = useAuthStore()
+
+const handleLogout = async () => {
+  try {
+    await authStore.logout()
+  } catch (error) {
+    console.error('Logout error:', error.message)
+  }
+}
+</script>
+
 <style>
-/* Globale Basis-Styles für die App */
+/* Global styles */
 body {
   margin: 0;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -20,7 +34,7 @@ body {
   color: #333;
 }
 
-#app {
+#app-container {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -30,29 +44,29 @@ body {
   background-color: #2c3e50;
   color: white;
   padding: 1rem;
-  text-align: center;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .app-header h1 {
-  margin: 0 0 0.5rem 0;
+  margin: 0;
   font-size: 1.8rem;
 }
 
-.app-header nav a {
-  color: #42b983;
-  text-decoration: none;
-  font-weight: bold;
+.logout-btn {
+  background-color: #e74c3c;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background-color 0.3s ease;
 }
 
-.app-header nav a:hover {
-  text-decoration: underline;
-}
-
-.app-content {
-  flex: 1;
-  padding: 2rem;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+.logout-btn:hover {
+  background-color: #c0392b;
 }
 </style>
