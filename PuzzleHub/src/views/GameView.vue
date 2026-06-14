@@ -4,8 +4,12 @@
 
     <div v-if="authStore.user && gameStore.gameStatus === 'idle'" class="idle-state">
       <h2>Willkommen!</h2>
-      <p>Kein aktives Spiel gefunden.</p>
-      <button @click="gameStore.startNewGame('easy')">Neues Spiel starten</button>
+      <p>Kein aktives Spiel gefunden. Wähle eine Schwierigkeit:</p>
+      <div class="difficulty-selection">
+        <button @click="gameStore.startNewGame('easy')">Leicht</button>
+        <button @click="gameStore.startNewGame('medium')" class="medium">Mittel</button>
+        <button @click="gameStore.startNewGame('hard')" class="hard">Schwer</button>
+      </div>
       <p class="waiting-for-lobby">
         Oder warte, bis ein anderes Spiel erstellt wird. Du wirst automatisch beitreten.
       </p>
@@ -81,21 +85,42 @@ onMounted(() => {
   gap: 1rem;
 }
 
-.idle-state button,
+.difficulty-selection {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.difficulty-selection button,
 .end-game-btn {
   padding: 10px 20px;
   font-size: 1rem;
   cursor: pointer;
   border: none;
-  background-color: #4caf50;
   color: white;
   border-radius: 5px;
   transition: background-color 0.3s;
 }
 
-.idle-state button:hover,
-.end-game-btn:hover {
+.difficulty-selection button {
+  background-color: #4caf50;
+}
+.difficulty-selection button:hover {
   background-color: #45a049;
+}
+
+.difficulty-selection .medium {
+  background-color: #ff9800;
+}
+.difficulty-selection .medium:hover {
+  background-color: #f57c00;
+}
+
+.difficulty-selection .hard {
+  background-color: #f44336;
+}
+.difficulty-selection .hard:hover {
+  background-color: #da190b;
 }
 
 .waiting-for-lobby {

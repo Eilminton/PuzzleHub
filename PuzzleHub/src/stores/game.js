@@ -98,15 +98,15 @@ export const useGameStore = defineStore('game', () => {
   async function startNewGame(difficulty = 'easy') {
     console.log(`🎮 [GameStore] startNewGame() getriggert. Schwierigkeit: ${difficulty}`)
     isLoading.value = true
-    // Unsubscribe from lobby when creating a game to avoid joining own game
+    // Unsubscribe from lobby when creating a a game to avoid joining own game
     if (lobbyChannel.value) {
-        console.log('🚪 [Lobby] Temporär von Lobby abgemeldet, um eigenes Spiel zu erstellen.')
-        supabase.removeChannel(lobbyChannel.value)
-        lobbyChannel.value = null
+      console.log('🚪 [Lobby] Temporär von Lobby abgemeldet, um eigenes Spiel zu erstellen.')
+      supabase.removeChannel(lobbyChannel.value)
+      lobbyChannel.value = null
     }
 
     try {
-      const puzzleResponse = await fetchMockSudokuPuzzle(difficulty)
+      const puzzleResponse = await fetchSudokuFromAPI(difficulty)
 
       const newBoard = puzzleResponse.puzzle.split('').map(Number)
       const newSolution = puzzleResponse.solution.split('').map(Number)
@@ -124,7 +124,7 @@ export const useGameStore = defineStore('game', () => {
           fixed_cells: newFixedCells,
           solution: newSolution,
           session_status: 'waiting',
-          partner_online: false,
+          partner_online: false
         })
         .select()
         .single()
@@ -147,9 +147,9 @@ export const useGameStore = defineStore('game', () => {
     isLoading.value = true
     // Unsubscribe from lobby when joining a game
     if (lobbyChannel.value) {
-        console.log('🚪 [Lobby] Von Lobby abgemeldet, da Spiel beigetreten.')
-        supabase.removeChannel(lobbyChannel.value)
-        lobbyChannel.value = null
+      console.log('🚪 [Lobby] Von Lobby abgemeldet, da Spiel beigetreten.')
+      supabase.removeChannel(lobbyChannel.value)
+      lobbyChannel.value = null
     }
 
     try {
@@ -158,7 +158,7 @@ export const useGameStore = defineStore('game', () => {
         .update({
           partner_id: authStore.user.id,
           session_status: 'active',
-          partner_online: true,
+          partner_online: true
         })
         .eq('id', sessionId)
         .select()
@@ -195,12 +195,12 @@ export const useGameStore = defineStore('game', () => {
     if (!session.value || !gameId.value) return
     console.log(`🏁 [GameStore] Beende Spiel mit Session ID: ${gameId.value}`)
     const { error } = await supabase
-        .from('sudoku_sessions')
-        .update({ session_status: 'finished' })
-        .eq('id', gameId.value)
-    
+      .from('sudoku_sessions')
+      .update({ session_status: 'finished' })
+      .eq('id', gameId.value)
+
     if (error) console.error('❌ [GameStore] Fehler beim Beenden des Spiels:', error.message)
-    
+
     // Reset state and re-initialize to listen for new games
     resetStore()
   }
@@ -237,13 +237,13 @@ export const useGameStore = defineStore('game', () => {
           ) {
             console.log(
               '⚡ [Lobby] Neues Spiel live entdeckt! Trete automatisch bei:',
-              payload.new.id,
+              payload.new.id
             )
             await joinGame(payload.new.id)
           } else {
             console.log('⏭️ [Lobby] Event ignoriert (eigenes Spiel oder nicht "waiting").')
           }
-        },
+        }
       )
       .subscribe((status, err) => {
         if (status === 'SUBSCRIBED') {
@@ -269,7 +269,7 @@ export const useGameStore = defineStore('game', () => {
           event: 'UPDATE',
           schema: 'public',
           table: 'sudoku_sessions',
-          filter: `id=eq.${sessionId}`,
+          filter: `id=eq.${sessionId}`
         },
         (payload) => {
           console.log('⚡ [GameStore] Realtime UPDATE empfangen!', payload.new)
@@ -279,18 +279,18 @@ export const useGameStore = defineStore('game', () => {
           isPartnerOnline.value = payload.new.partner_online || false
 
           if (payload.new.session_status === 'finished') {
-              console.log("🏁 Partner hat das Spiel beendet.")
-              resetStore()
+            console.log('🏁 Partner hat das Spiel beendet.')
+            resetStore()
           }
-        },
+        }
       )
       .subscribe((status, err) => {
-          if (status === 'SUBSCRIBED') {
-            console.log(`[Game] Subscription zu Session ${sessionId} erfolgreich.`)
-            updatePartnerOnlineStatus(true)
-          } else {
-            console.log(`[Game] Subscription Status: ${status}`, err || '')
-          }
+        if (status === 'SUBSCRIBED') {
+          console.log(`[Game] Subscription zu Session ${sessionId} erfolgreich.`)
+          updatePartnerOnlineStatus(true)
+        } else {
+          console.log(`[Game] Subscription Status: ${status}`, err || '')
+        }
       })
   }
 
@@ -320,13 +320,32 @@ export const useGameStore = defineStore('game', () => {
     init()
   }
 
-  // Helper for mock data
-  async function fetchMockSudokuPuzzle(difficulty) {
-    return Promise.resolve({
-      difficulty: difficulty,
-      puzzle: '003000540007080000100537960061005070408000620090608013800760354004003796700009200',
-      solution: '983126547657984132142537968361245879478391625295678413819762354524813796736459281',
+  // Helper for fetching sudoku data from API
+  async function fetchSudokuFromAPI(difficulty) {
+    const apiKey = import.meta.env.VITE_YOUDOSUDOKU_API_KEY
+    if (!apiKey) {
+      throw new Error('API key for youdosudoku.com is not configured.')
+    }
+
+    const response = await fetch('/api/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey
+      },
+      body: JSON.stringify({
+        difficulty: difficulty,
+        solution: true,
+        array: false
+      })
     })
+
+    if (!response.ok) {
+      throw new Error(`Error fetching sudoku: ${response.statusText}`)
+    }
+
+    const data = await response.json()
+    return data
   }
 
   return {
@@ -345,6 +364,6 @@ export const useGameStore = defineStore('game', () => {
     updateCell,
     resetStore,
     endGame,
-    solution,
+    solution
   }
 })
