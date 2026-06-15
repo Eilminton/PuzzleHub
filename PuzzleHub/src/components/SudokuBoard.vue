@@ -55,11 +55,14 @@ const handleCellUpdate = ({ row, col, value }) => {
 .sudoku-board {
   display: grid;
   grid-template-rows: repeat(9, 1fr);
-  border: 2px solid #333;
-  width: min(90vw, 500px); /* Max width and responsive */
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  width: min(90vw, 520px);
   height: min(90vw, 500px);
-  aspect-ratio: 1 / 1; /* Keep square aspect ratio */
+  aspect-ratio: 1 / 1;
   margin: 1.5rem auto;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 18px;
+  overflow: hidden;
 }
 
 .sudoku-row {
@@ -69,10 +72,10 @@ const handleCellUpdate = ({ row, col, value }) => {
 
 /* Thicker lines for 3x3 blocks */
 .sudoku-row .border-right {
-  border-right: 2px solid #333;
+  border-right: 2px solid rgba(255, 255, 255, 0.18);
 }
 
 .border-bottom {
-  border-bottom: 2px solid #333;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.18);
 }
 </style>

@@ -37,8 +37,9 @@ const handleInput = (event) => {
   display: flex;
   justify-content: center;
   align-items: center;
-  border: 1px solid #ddd;
-  box-sizing: border-box; /* Ensures padding and border are included in the width */
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .sudoku-cell input {
@@ -49,12 +50,13 @@ const handleInput = (event) => {
   border: none;
   background-color: transparent;
   outline: none;
+  color: var(--text);
+  caret-color: var(--accent);
 }
 
 .sudoku-cell.is-fixed input {
   font-weight: bold;
-  background-color: #e0e0e0;
   cursor: not-allowed;
-  color: #333;
+  color: var(--accent);
 }
 </style>

@@ -2,7 +2,9 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import HomeView from '../views/HomeView.vue'
 import LoginView from '../views/LoginView.vue'
-import { supabase } from '../supabase' // Import supabase for initial session check
+import SudokuEditorView from '../views/SudokuEditorView.vue'
+import SudokuLibraryView from '../views/SudokuLibraryView.vue'
+import { supabase } from '../supabase'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -11,7 +13,20 @@ const router = createRouter({
       path: '/',
       name: 'home',
       component: HomeView,
-      meta: { requiresAuth: true }, // Protect this route
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/sudoku',
+      name: 'sudoku-library',
+      component: SudokuLibraryView,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/sudoku/:id',
+      name: 'sudoku-editor',
+      component: SudokuEditorView,
+      meta: { requiresAuth: true },
+      props: true,
     },
     {
       path: '/login',
@@ -21,25 +36,26 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach(async (to) => { // Removed 'from', 'next' parameters
+router.beforeEach(async (to) => {
   const authStore = useAuthStore()
 
-  // Ensure the auth state is initialized (especially on first load)
-  // This will try to get the session from Supabase if not already set
   if (authStore.user === null) {
-      const { data: { session } } = await supabase.auth.getSession()
-      authStore.user = session?.user || null
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    authStore.user = session?.user || null
   }
 
-  const requiresAuth = to.matched.some(record => record.meta.requiresAuth)
+  const requiresAuth = to.matched.some((record) => record.meta.requiresAuth)
   const isAuthenticated = authStore.user !== null
 
   if (requiresAuth && !isAuthenticated) {
-    return '/login' // Return path instead of next('/login')
-  } else if (to.name === 'login' && isAuthenticated) {
-    return '/' // Return path instead of next('/')
+    return { name: 'login' }
   }
-  // No explicit return means next() is called implicitly
+
+  if (to.name === 'login' && isAuthenticated) {
+    return { name: 'home' }
+  }
 })
 
 export default router

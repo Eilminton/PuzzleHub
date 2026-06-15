@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { supabase } from '../supabase'
+import { useGameStore } from './game'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref(null)
@@ -12,6 +13,9 @@ export const useAuthStore = defineStore('auth', () => {
 
   supabase.auth.onAuthStateChange((_, session) => {
     user.value = session?.user || null
+    if (!session) {
+      useGameStore().resetStore()
+    }
   })
 
   async function login(email, password) {
@@ -26,6 +30,7 @@ export const useAuthStore = defineStore('auth', () => {
     const { error } = await supabase.auth.signOut()
     if (error) throw error
     user.value = null
+    useGameStore().resetStore()
   }
 
   return { user, login, logout }

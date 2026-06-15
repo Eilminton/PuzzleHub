@@ -1,326 +1,540 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { computed, ref } from 'vue'
 import { supabase } from '../supabase'
 import { useAuthStore } from './auth'
 
-export const useGameStore = defineStore('game', () => {
-  // ==========================================
-  // STATE
-  // ==========================================
-  const session = ref(null)
-  const board = ref(Array(81).fill(0))
-  const fixedCells = ref([])
-  const solution = ref(Array(81).fill(0))
-  const isLoading = ref(false)
-  const isPartnerOnline = ref(false)
-  const gameStatus = ref('idle') // 'idle', 'waiting', 'active', 'finished'
-  const realtimeChannel = ref(null)
-  const lobbyChannel = ref(null)
+const DIFFICULTIES = ['easy', 'medium', 'hard']
 
+function createEmptyBoard() {
+  return Array(81).fill(0)
+}
+
+function normalizeBoard(board) {
+  if (!Array.isArray(board) || board.length !== 81) {
+    return createEmptyBoard()
+  }
+
+  return board.map((value) => Number(value) || 0)
+}
+
+function normalizeCells(cells) {
+  if (!Array.isArray(cells)) {
+    return []
+  }
+
+  return cells
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value >= 0 && value < 81)
+}
+
+function arraysEqual(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+    return false
+  }
+
+  return a.every((value, index) => Number(value) === Number(b[index]))
+}
+
+function getFixedCells(board) {
+  return board.reduce((cells, value, index) => {
+    if (Number(value) !== 0) {
+      cells.push(index)
+    }
+
+    return cells
+  }, [])
+}
+
+function derivePuzzleStatus(board, initialBoard, solution, forcePaused = false) {
+  const normalizedBoard = normalizeBoard(board)
+  const normalizedInitialBoard = normalizeBoard(initialBoard)
+  const normalizedSolution = normalizeBoard(solution)
+
+  if (arraysEqual(normalizedBoard, normalizedSolution)) {
+    return 'finished'
+  }
+
+  if (forcePaused) {
+    return 'paused'
+  }
+
+  if (arraysEqual(normalizedBoard, normalizedInitialBoard)) {
+    return 'new'
+  }
+
+  return 'in_progress'
+}
+
+function normalizePuzzleRow(row) {
+  if (!row) return null
+
+  return {
+    ...row,
+    status: row.status || row.session_status || 'new',
+    difficulty: row.difficulty || 'easy',
+    board: normalizeBoard(row.board),
+    initial_board: normalizeBoard(row.initial_board),
+    solution: normalizeBoard(row.solution),
+    fixed_cells: normalizeCells(row.fixed_cells),
+  }
+}
+
+function getDifficultyOrder(difficulty) {
+  return DIFFICULTIES.includes(difficulty) ? difficulty : 'easy'
+}
+
+function buildPuzzleTitle(difficulty) {
+  const labels = {
+    easy: 'Leicht',
+    medium: 'Mittel',
+    hard: 'Schwer',
+  }
+
+  const today = new Date()
+  const stamp = today.toLocaleDateString('de-CH', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+
+  return `Sudoku ${labels[getDifficultyOrder(difficulty)]} ${stamp}`
+}
+
+export const useGameStore = defineStore('game', () => {
   const authStore = useAuthStore()
 
-  // ==========================================
-  // GETTERS
-  // ==========================================
-  const gameId = computed(() => session.value?.id)
-  const isHost = computed(() => authStore.user?.id === session.value?.host_id)
-  const isPartner = computed(() => authStore.user?.id === session.value?.partner_id)
-  const isMyTurn = computed(() => true)
+  const coupleId = ref(null)
+  const coupleMember = ref(null)
+  const puzzles = ref([])
+  const activePuzzle = ref(null)
+  const board = ref(createEmptyBoard())
+  const fixedCells = ref([])
+  const solution = ref(createEmptyBoard())
+  const isLoading = ref(false)
+  const isInitialized = ref(false)
+  const errorMessage = ref('')
+  const libraryChannel = ref(null)
+  const activePuzzleChannel = ref(null)
 
-  // ==========================================
-  // ACTIONS (Haupt-Spiellogik)
-  // ==========================================
+  const gameId = computed(() => activePuzzle.value?.id || null)
+  const gameStatus = computed(() => (activePuzzle.value ? 'active' : 'idle'))
+  const selectedDifficulty = computed(() => activePuzzle.value?.difficulty || null)
+  const isActivePuzzleFinished = computed(
+    () => activePuzzle.value?.status === 'finished' || arraysEqual(board.value, solution.value)
+  )
+
+  const puzzlesByDifficulty = computed(() => {
+    return DIFFICULTIES.reduce((groups, difficulty) => {
+      groups[difficulty] = puzzles.value.filter(
+        (puzzle) => getDifficultyOrder(puzzle.difficulty) === difficulty
+      )
+      return groups
+    }, {})
+  })
+
   async function init() {
-    console.log('🔍 [GameStore] init() gestartet für User:', authStore.user?.id)
     if (!authStore.user) {
-      console.log('🛑 [GameStore] Kein authentifizierter User gefunden. Breche ab.')
-      gameStatus.value = 'idle'
+      resetRuntimeState()
       return
     }
 
     isLoading.value = true
+    errorMessage.value = ''
+
     try {
-      // Clean up any existing channels before starting
-      if (realtimeChannel.value) supabase.removeChannel(realtimeChannel.value)
-      if (lobbyChannel.value) supabase.removeChannel(lobbyChannel.value)
-      realtimeChannel.value = null
-      lobbyChannel.value = null
-
-      // 1. Prüfe auf bereits aktive Sessions
-      console.log('📡 [GameStore] Prüfe auf existierende aktive Sessions...')
-      let { data: myActiveSession, error: myActiveError } = await supabase
-        .from('sudoku_sessions')
-        .select('*')
-        .or(`host_id.eq.${authStore.user.id},partner_id.eq.${authStore.user.id}`)
-        .in('session_status', ['active', 'waiting'])
-        .maybeSingle()
-
-      if (myActiveError) throw myActiveError
-
-      if (myActiveSession) {
-        console.log('✅ [GameStore] Aktive oder wartende Session gefunden! ID:', myActiveSession.id)
-        loadSessionData(myActiveSession)
-        gameStatus.value = myActiveSession.session_status
-        return
-      }
-
-      // 2. Prüfe auf wartende Sessions von anderen Spielern
-      console.log('📡 [GameStore] Keine eigene Session. Suche nach fremden wartenden Spielen...')
-      let { data: waitingSession, error: waitingError } = await supabase
-        .from('sudoku_sessions')
-        .select('*')
-        .eq('session_status', 'waiting')
-        .is('partner_id', null)
-        .neq('host_id', authStore.user.id)
-        .limit(1)
-        .maybeSingle()
-
-      if (waitingError) throw waitingError
-
-      if (waitingSession) {
-        console.log(`🚀 [GameStore] Wartendes Spiel beim Start gefunden. Trete bei...`)
-        await joinGame(waitingSession.id)
-        return
-      }
-
-      // 3. Wenn kein Spiel da ist, lausche LIVE auf der Lobby, ob jemand eins erstellt
-      console.log('ℹ️ Keine Spiele offen. Starte Live-Lobby-Überwachung...')
-      gameStatus.value = 'idle'
-      subscribeToLobby()
-    } catch (err) {
-      console.error('💥 [GameStore] Fehler im init():', err.message)
-      resetStore()
+      await ensureCoupleScope()
+      await refreshLibrary()
+      subscribeToLibrary()
+      isInitialized.value = true
+    } catch (error) {
+      errorMessage.value = error?.message || 'Bibliothek konnte nicht geladen werden.'
+      console.error('[GameStore] init error:', error)
     } finally {
       isLoading.value = false
     }
   }
 
-  async function startNewGame(difficulty = 'easy') {
-    console.log(`🎮 [GameStore] startNewGame() getriggert. Schwierigkeit: ${difficulty}`)
-    isLoading.value = true
-    // Unsubscribe from lobby when creating a a game to avoid joining own game
-    if (lobbyChannel.value) {
-      console.log('🚪 [Lobby] Temporär von Lobby abgemeldet, um eigenes Spiel zu erstellen.')
-      supabase.removeChannel(lobbyChannel.value)
-      lobbyChannel.value = null
+  async function ensureCoupleScope() {
+    if (!authStore.user) {
+      throw new Error('Du musst eingeloggt sein.')
     }
 
+    if (coupleId.value) {
+      return coupleId.value
+    }
+
+    const { data, error } = await supabase
+      .from('couple_members')
+      .select('couple_id')
+      .eq('user_id', authStore.user.id)
+      .maybeSingle()
+
+    if (error) {
+      throw error
+    }
+
+    if (!data?.couple_id) {
+      throw new Error('Kein gemeinsamer Couple-Kontext gefunden.')
+    }
+
+    coupleMember.value = data
+    coupleId.value = data.couple_id
+    return coupleId.value
+  }
+
+  async function refreshLibrary() {
+    const scopeId = await ensureCoupleScope()
+
+    const { data, error } = await supabase
+      .from('sudoku_sessions')
+      .select('*')
+      .eq('couple_id', scopeId)
+      .is('deleted_at', null)
+      .order('updated_at', { ascending: false })
+
+    if (error) {
+      throw error
+    }
+
+    puzzles.value = (data || []).map(normalizePuzzleRow).filter(Boolean)
+  }
+
+  function subscribeToLibrary() {
+    if (libraryChannel.value) {
+      return
+    }
+
+    if (!coupleId.value) {
+      return
+    }
+
+    libraryChannel.value = supabase
+      .channel(`couple-sudoku-library:${coupleId.value}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'sudoku_sessions',
+          filter: `couple_id=eq.${coupleId.value}`,
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            if (!payload.new?.deleted_at) {
+              upsertPuzzle(normalizePuzzleRow(payload.new))
+            }
+            return
+          }
+
+          if (payload.eventType === 'UPDATE') {
+            const nextPuzzle = normalizePuzzleRow(payload.new)
+          if (nextPuzzle?.deleted_at) {
+            removePuzzle(nextPuzzle.id)
+            if (activePuzzle.value?.id === nextPuzzle.id) {
+              clearActivePuzzle(true)
+            }
+            return
+          }
+
+            upsertPuzzle(nextPuzzle)
+            if (activePuzzle.value?.id === nextPuzzle?.id) {
+              syncActivePuzzle(nextPuzzle)
+            }
+            return
+          }
+
+          if (payload.eventType === 'DELETE') {
+            removePuzzle(payload.old?.id)
+            if (activePuzzle.value?.id === payload.old?.id) {
+              clearActivePuzzle(true)
+            }
+          }
+        }
+      )
+      .subscribe()
+  }
+
+  function upsertPuzzle(nextPuzzle) {
+    if (!nextPuzzle) return
+
+    const index = puzzles.value.findIndex((entry) => entry.id === nextPuzzle.id)
+    if (index === -1) {
+      puzzles.value = [nextPuzzle, ...puzzles.value].sort(sortByUpdatedAtDesc)
+      return
+    }
+
+    const next = [...puzzles.value]
+    next[index] = nextPuzzle
+    puzzles.value = next.sort(sortByUpdatedAtDesc)
+  }
+
+  function removePuzzle(puzzleId) {
+    puzzles.value = puzzles.value.filter((puzzle) => puzzle.id !== puzzleId)
+  }
+
+  function sortByUpdatedAtDesc(a, b) {
+    return new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+  }
+
+  async function startNewGame(difficulty = 'easy') {
+    if (!authStore.user) {
+      throw new Error('Du musst eingeloggt sein.')
+    }
+
+    isLoading.value = true
+    errorMessage.value = ''
+
     try {
+      const scopeId = await ensureCoupleScope()
       const puzzleResponse = await fetchSudokuFromAPI(difficulty)
 
-      const newBoard = puzzleResponse.puzzle.split('').map(Number)
-      const newSolution = puzzleResponse.solution.split('').map(Number)
-
-      const newFixedCells = []
-      newBoard.forEach((val, index) => {
-        if (val !== 0) newFixedCells.push(index)
-      })
+      const initialBoard = puzzleResponse.puzzle.split('').map(Number)
+      const solutionBoard = puzzleResponse.solution.split('').map(Number)
+      const fixed = getFixedCells(initialBoard)
+      const now = new Date().toISOString()
 
       const { data, error } = await supabase
         .from('sudoku_sessions')
         .insert({
           host_id: authStore.user.id,
-          board: newBoard,
-          fixed_cells: newFixedCells,
-          solution: newSolution,
-          session_status: 'waiting',
-          partner_online: false
+          partner_id: null,
+          couple_id: scopeId,
+          title: buildPuzzleTitle(difficulty),
+          difficulty: getDifficultyOrder(difficulty),
+          board: initialBoard,
+          initial_board: initialBoard,
+          fixed_cells: fixed,
+          solution: solutionBoard,
+          status: 'new',
+          deleted_at: null,
+          last_opened_at: now,
+          updated_at: now,
+          last_edited_by: authStore.user.id,
         })
         .select()
         .single()
 
-      if (error) throw error
+      if (error) {
+        throw error
+      }
 
-      console.log('🎉 [GameStore] Neue Session erfolgreich in DB erstellt! ID:', data.id)
-      loadSessionData(data)
-      gameStatus.value = 'waiting'
-    } catch (err) {
-      console.error('💥 [GameStore] Fehler beim Spielstart:', err.message)
-      resetStore()
+      const normalized = normalizePuzzleRow(data)
+      upsertPuzzle(normalized)
+      await openPuzzle(normalized.id, { skipRefresh: true })
+      return normalized
+    } catch (error) {
+      errorMessage.value = error?.message || 'Neues Sudoku konnte nicht erstellt werden.'
+      console.error('[GameStore] startNewGame error:', error)
+      throw error
     } finally {
       isLoading.value = false
     }
   }
 
-  async function joinGame(sessionId) {
-    console.log(`🤝 [GameStore] joinGame() aufgerufen für Session ID: ${sessionId}`)
-    isLoading.value = true
-    // Unsubscribe from lobby when joining a game
-    if (lobbyChannel.value) {
-      console.log('🚪 [Lobby] Von Lobby abgemeldet, da Spiel beigetreten.')
-      supabase.removeChannel(lobbyChannel.value)
-      lobbyChannel.value = null
+  async function openPuzzle(puzzleId, options = {}) {
+    const { skipRefresh = false } = options
+
+    if (!authStore.user) {
+      throw new Error('Du musst eingeloggt sein.')
     }
 
+    isLoading.value = true
+    errorMessage.value = ''
+
     try {
-      const { data, error } = await supabase
+      await ensureCoupleScope()
+
+      let puzzle = puzzles.value.find((entry) => entry.id === puzzleId)
+
+      if (!puzzle || !skipRefresh) {
+        const { data, error } = await supabase
+          .from('sudoku_sessions')
+          .select('*')
+          .eq('id', puzzleId)
+          .eq('couple_id', coupleId.value)
+          .maybeSingle()
+
+        if (error) {
+          throw error
+        }
+
+        puzzle = normalizePuzzleRow(data)
+      }
+
+      if (!puzzle) {
+        throw new Error('Sudoku konnte nicht gefunden werden.')
+      }
+
+      syncActivePuzzle(puzzle)
+      await supabase
         .from('sudoku_sessions')
         .update({
-          partner_id: authStore.user.id,
-          session_status: 'active',
-          partner_online: true
+          last_opened_at: new Date().toISOString(),
         })
-        .eq('id', sessionId)
-        .select()
-        .single()
+        .eq('id', puzzleId)
 
-      if (error) throw error
-
-      console.log('🥳 [GameStore] Erfolgreich der Session beigetreten! Daten geladen.')
-      loadSessionData(data)
-      gameStatus.value = 'active'
-    } catch (err) {
-      console.error('💥 [GameStore] Fehler beim Beitreten des Spiels:', err.message)
-      resetStore()
+      subscribeToActivePuzzle(puzzleId)
+      return puzzle
+    } catch (error) {
+      errorMessage.value = error?.message || 'Sudoku konnte nicht geöffnet werden.'
+      console.error('[GameStore] openPuzzle error:', error)
+      throw error
     } finally {
       isLoading.value = false
     }
   }
 
   async function updateCell(index, value) {
-    if (!session.value || !gameId.value) return
-    if (fixedCells.value.includes(index)) return
+    if (!activePuzzle.value) {
+      return
+    }
 
-    const newBoard = [...board.value]
-    newBoard[index] = value
+    if (fixedCells.value.includes(index)) {
+      return
+    }
+
+    const nextBoard = [...board.value]
+    nextBoard[index] = Number(value) || 0
+    await persistActivePuzzle(nextBoard)
+  }
+
+  async function persistActivePuzzle(nextBoard, forcePaused = false) {
+    if (!activePuzzle.value || !gameId.value) {
+      return
+    }
+
+    const nextStatus = derivePuzzleStatus(
+      nextBoard,
+      activePuzzle.value.initial_board,
+      solution.value,
+      forcePaused
+    )
+    const now = new Date().toISOString()
+    const nextPayload = {
+      board: nextBoard,
+      status: nextStatus,
+      updated_at: now,
+      last_opened_at: now,
+      last_edited_by: authStore.user?.id || null,
+    }
+
+    board.value = normalizeBoard(nextBoard)
+    activePuzzle.value = {
+      ...activePuzzle.value,
+      ...nextPayload,
+    }
+
+    const { error } = await supabase.from('sudoku_sessions').update(nextPayload).eq('id', gameId.value)
+    if (error) {
+      errorMessage.value = error.message
+      throw error
+    }
+  }
+
+  async function closePuzzle() {
+    if (!activePuzzle.value) {
+      return
+    }
+
+    const shouldPause = !isActivePuzzleFinished.value
+    const nextBoard = [...board.value]
 
     try {
-      await supabase.from('sudoku_sessions').update({ board: newBoard }).eq('id', gameId.value)
-    } catch (err) {
-      console.error('❌ [GameStore] Fehler beim Senden des Zell-Updates:', err.message)
+      if (shouldPause) {
+        await persistActivePuzzle(nextBoard, true)
+      }
+    } finally {
+      clearActivePuzzle(true)
+    }
+  }
+
+  async function deletePuzzle(puzzleId) {
+    if (!puzzleId) {
+      return
+    }
+
+    const now = new Date().toISOString()
+    const { error } = await supabase
+      .from('sudoku_sessions')
+      .update({
+        deleted_at: now,
+        status: 'deleted',
+        updated_at: now,
+      })
+      .eq('id', puzzleId)
+
+    if (error) {
+      errorMessage.value = error.message
+      throw error
+    }
+
+    removePuzzle(puzzleId)
+    if (activePuzzle.value?.id === puzzleId) {
+      clearActivePuzzle(true)
     }
   }
 
   async function endGame() {
-    if (!session.value || !gameId.value) return
-    console.log(`🏁 [GameStore] Beende Spiel mit Session ID: ${gameId.value}`)
-    const { error } = await supabase
-      .from('sudoku_sessions')
-      .update({ session_status: 'finished' })
-      .eq('id', gameId.value)
-
-    if (error) console.error('❌ [GameStore] Fehler beim Beenden des Spiels:', error.message)
-
-    // Reset state and re-initialize to listen for new games
-    resetStore()
+    await closePuzzle()
   }
 
-  function loadSessionData(supabaseSession) {
-    console.log('📦 [GameStore] Lade Session-Daten in den lokalen State...', supabaseSession)
-    session.value = supabaseSession
-    board.value = supabaseSession.board
-    fixedCells.value = supabaseSession.fixed_cells || []
-    solution.value = supabaseSession.solution || []
-    isPartnerOnline.value = supabaseSession.partner_online || false
-
-    // Subscribe to changes for the current game
-    subscribeToGameChanges(supabaseSession.id)
-  }
-
-  function subscribeToLobby() {
-    if (lobbyChannel.value) {
-      console.log('ℹ️ [Lobby] Subscription ist bereits aktiv.')
-      return
+  function clearActivePuzzle(removeChannel = true) {
+    if (removeChannel && activePuzzleChannel.value) {
+      supabase.removeChannel(activePuzzleChannel.value)
     }
 
-    console.log('🔌 [Lobby] Starte neue Subscription für die Lobby...')
-    lobbyChannel.value = supabase
-      .channel('public:sudoku_lobby')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'sudoku_sessions' },
-        async (payload) => {
-          console.log('📬 [Lobby] Eingehendes Event:', payload)
-          if (
-            payload.new.session_status === 'waiting' &&
-            payload.new.host_id !== authStore.user.id
-          ) {
-            console.log(
-              '⚡ [Lobby] Neues Spiel live entdeckt! Trete automatisch bei:',
-              payload.new.id
-            )
-            await joinGame(payload.new.id)
-          } else {
-            console.log('⏭️ [Lobby] Event ignoriert (eigenes Spiel oder nicht "waiting").')
-          }
-        }
-      )
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ [Lobby] Erfolgreich für die Lobby angemeldet!')
-        } else {
-          console.log(`[Lobby] Status: ${status}`, err || '')
-        }
-      })
+    activePuzzleChannel.value = null
+    activePuzzle.value = null
+    board.value = createEmptyBoard()
+    fixedCells.value = []
+    solution.value = createEmptyBoard()
   }
 
-  function subscribeToGameChanges(sessionId) {
-    if (realtimeChannel.value) {
-      console.log('🔄 [GameStore] Alter Realtime-Kanal wird entfernt.')
-      supabase.removeChannel(realtimeChannel.value)
+  function syncActivePuzzle(puzzle) {
+    const normalized = normalizePuzzleRow(puzzle)
+    if (!normalized) return
+
+    activePuzzle.value = normalized
+    board.value = normalized.board
+    fixedCells.value = normalized.fixed_cells
+    solution.value = normalized.solution
+  }
+
+  function subscribeToActivePuzzle(puzzleId) {
+    if (activePuzzleChannel.value) {
+      supabase.removeChannel(activePuzzleChannel.value)
     }
 
-    console.log(`🔌 [GameStore] Starte Realtime-Subscription für Session ${sessionId}`)
-    realtimeChannel.value = supabase
-      .channel(`sudoku_session:${sessionId}`)
+    activePuzzleChannel.value = supabase
+      .channel(`couple-sudoku:${puzzleId}`)
       .on(
         'postgres_changes',
         {
-          event: 'UPDATE',
+          event: '*',
           schema: 'public',
           table: 'sudoku_sessions',
-          filter: `id=eq.${sessionId}`
+          filter: `id=eq.${puzzleId}`,
         },
         (payload) => {
-          console.log('⚡ [GameStore] Realtime UPDATE empfangen!', payload.new)
-          session.value = payload.new
-          board.value = payload.new.board
-          gameStatus.value = payload.new.session_status
-          isPartnerOnline.value = payload.new.partner_online || false
-
-          if (payload.new.session_status === 'finished') {
-            console.log('🏁 Partner hat das Spiel beendet.')
-            resetStore()
+          if (!payload?.new) {
+            return
           }
+
+          const nextPuzzle = normalizePuzzleRow(payload.new)
+
+          if (nextPuzzle?.deleted_at) {
+            removePuzzle(nextPuzzle.id)
+            clearActivePuzzle(true)
+            return
+          }
+
+          syncActivePuzzle(nextPuzzle)
+          upsertPuzzle(nextPuzzle)
         }
       )
-      .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          console.log(`[Game] Subscription zu Session ${sessionId} erfolgreich.`)
-          updatePartnerOnlineStatus(true)
-        } else {
-          console.log(`[Game] Subscription Status: ${status}`, err || '')
-        }
-      })
+      .subscribe()
   }
 
-  async function updatePartnerOnlineStatus(isOnline) {
-    if (!session.value || !authStore.user || authStore.user.id === session.value.host_id) return
-
-    console.log(`📡 [GameStore] Setze partner_online auf: ${isOnline}`)
-    await supabase
-      .from('sudoku_sessions')
-      .update({ partner_online: isOnline })
-      .eq('id', session.value.id)
-  }
-
-  function resetStore() {
-    console.log('🧹 [GameStore] Resette gesamten Store-State.')
-    if (realtimeChannel.value) supabase.removeChannel(realtimeChannel.value)
-    if (lobbyChannel.value) supabase.removeChannel(lobbyChannel.value)
-    realtimeChannel.value = null
-    lobbyChannel.value = null
-    session.value = null
-    board.value = Array(81).fill(0)
-    fixedCells.value = []
-    solution.value = Array(81).fill(0)
-    gameStatus.value = 'idle'
-    // Nach dem Reset wird die App dank `onMounted` in HomeView neu initialisiert
-    // und `init()` aufgerufen, was bei Bedarf die Lobby-Subscription neu startet.
-    init()
-  }
-
-  // Helper for fetching sudoku data from API
   async function fetchSudokuFromAPI(difficulty) {
     const apiKey = import.meta.env.VITE_YOUDOSUDOKU_API_KEY
     if (!apiKey) {
@@ -331,39 +545,74 @@ export const useGameStore = defineStore('game', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey
+        'x-api-key': apiKey,
       },
       body: JSON.stringify({
-        difficulty: difficulty,
+        difficulty,
         solution: true,
-        array: false
-      })
+        array: false,
+      }),
     })
 
     if (!response.ok) {
       throw new Error(`Error fetching sudoku: ${response.statusText}`)
     }
 
-    const data = await response.json()
-    return data
+    return response.json()
+  }
+
+  function resetRuntimeState() {
+    if (libraryChannel.value) {
+      supabase.removeChannel(libraryChannel.value)
+    }
+
+    if (activePuzzleChannel.value) {
+      supabase.removeChannel(activePuzzleChannel.value)
+    }
+
+    libraryChannel.value = null
+    activePuzzleChannel.value = null
+    coupleId.value = null
+    coupleMember.value = null
+    puzzles.value = []
+    activePuzzle.value = null
+    board.value = createEmptyBoard()
+    fixedCells.value = []
+    solution.value = createEmptyBoard()
+    isLoading.value = false
+    isInitialized.value = false
+    errorMessage.value = ''
+  }
+
+  function resetStore() {
+    resetRuntimeState()
   }
 
   return {
-    session,
+    activePuzzle,
     board,
-    fixedCells,
-    isLoading,
-    gameStatus,
-    isPartnerOnline,
-    gameId,
-    isHost,
-    isPartner,
-    init,
-    startNewGame,
-    joinGame,
-    updateCell,
-    resetStore,
+    coupleId,
+    coupleMember,
+    deletePuzzle,
     endGame,
-    solution
+    errorMessage,
+    fixedCells,
+    gameId,
+    gameStatus,
+    init,
+    isActivePuzzleFinished,
+    isInitialized,
+    isLoading,
+    openPuzzle,
+    persistActivePuzzle,
+    puzzles,
+    puzzlesByDifficulty,
+    refreshLibrary,
+    resetStore,
+    selectedDifficulty,
+    solution,
+    startNewGame,
+    updateCell,
+    closePuzzle,
   }
 })
