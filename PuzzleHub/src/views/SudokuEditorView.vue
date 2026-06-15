@@ -5,14 +5,16 @@
         <p class="eyebrow">Sudoku editor</p>
         <h2>{{ gameStore.activePuzzle.title }}</h2>
         <p class="lead">
-          Schwierigkeit: {{ difficultyLabels[gameStore.activePuzzle.difficulty] }}.
-          Änderungen werden live für beide Partner gespeichert.
+          Schwierigkeit: {{ difficultyLabels[gameStore.activePuzzle.difficulty] }}. Änderungen
+          werden live für beide Partner gespeichert.
         </p>
 
         <div class="info-grid">
           <div class="info-card">
             <span class="info-label">Status</span>
-            <span class="info-value">{{ statusLabel[gameStore.activePuzzle.status] || gameStore.activePuzzle.status }}</span>
+            <span class="info-value">{{
+              statusLabel[gameStore.activePuzzle.status] || gameStore.activePuzzle.status
+            }}</span>
           </div>
           <div class="info-card">
             <span class="info-label">Fortschritt</span>
@@ -29,7 +31,6 @@
         </div>
 
         <div class="action-row">
-          <button class="secondary-btn" @click="closePuzzle">Zur Bibliothek</button>
           <button class="secondary-btn" @click="closePuzzle">Schliessen</button>
           <button class="danger-btn" @click="removePuzzle">Löschen</button>
         </div>
@@ -49,7 +50,10 @@
       <p class="eyebrow">Sudoku editor</p>
       <h2>Sudoku wird geladen</h2>
       <p class="lead">
-        {{ gameStore.errorMessage || 'Falls das Puzzle nicht direkt geladen wurde, kehren wir zur Bibliothek zurück.' }}
+        {{
+          gameStore.errorMessage ||
+          'Falls das Puzzle nicht direkt geladen wurde, kehren wir zur Bibliothek zurück.'
+        }}
       </p>
       <router-link to="/sudoku" class="primary-btn">Zur Bibliothek</router-link>
     </section>
@@ -87,7 +91,7 @@ const progress = computed(() => {
   }
 
   const filled = gameStore.board.filter(
-    (value, index) => !gameStore.fixedCells.includes(index) && value !== 0
+    (value, index) => !gameStore.fixedCells.includes(index) && value !== 0,
   ).length
 
   return Math.round((filled / totalPlayable) * 100)
@@ -102,7 +106,7 @@ watch(
   () => route.params.id,
   async () => {
     await ensurePuzzleLoaded()
-  }
+  },
 )
 
 onBeforeRouteLeave(async () => {

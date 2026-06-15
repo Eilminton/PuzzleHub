@@ -75,8 +75,7 @@
         </p>
 
         <div class="card-actions">
-          <button class="ghost-btn" @click="openPuzzle(puzzle.id)">Öffnen</button>
-          <button class="ghost-btn" @click="continuePuzzle(puzzle.id)">Fortsetzen</button>
+          <button class="ghost-btn" @click="goToPuzzle(puzzle.id)">Öffnen</button>
           <button class="danger-btn" @click="removePuzzle(puzzle.id)">Löschen</button>
         </div>
       </article>
@@ -128,22 +127,13 @@ async function createPuzzle(difficulty) {
   }
 }
 
-async function openPuzzle(puzzleId) {
-  actionError.value = ''
-  try {
-    await router.push({ name: 'sudoku-editor', params: { id: puzzleId } })
-  } catch (error) {
-    actionError.value = error?.message || 'Sudoku konnte nicht geöffnet werden.'
-  }
-}
-
-async function continuePuzzle(puzzleId) {
+async function goToPuzzle(puzzleId) {
   actionError.value = ''
   try {
     await gameStore.openPuzzle(puzzleId)
     await router.push({ name: 'sudoku-editor', params: { id: puzzleId } })
   } catch (error) {
-    actionError.value = error?.message || 'Fortsetzen ist gerade nicht möglich.'
+    actionError.value = error?.message || 'Sudoku konnte nicht geöffnet werden.'
   }
 }
 
