@@ -7,14 +7,14 @@
       :class="{ 'border-bottom': (rowIndex + 1) % 3 === 0 && rowIndex < 8 }"
     >
       <SudokuCell
-        v-for="(cell, colIndex) in row"
-        :key="`${rowIndex}-${colIndex}`"
-        :row="rowIndex"
-        :col="colIndex"
-        :modelValue="cell.value"
+        v-for="cell in row"
+        :key="cell.index"
+        :value="cell.value"
+        :notes="cell.notes"
         :isFixed="cell.isOriginal"
-        @update:modelValue="handleCellUpdate"
-        :class="{ 'border-right': (colIndex + 1) % 3 === 0 && colIndex < 8 }"
+        :isSelected="selectedIndex === cell.index"
+        @select="handleSelect(cell.index)"
+        :class="{ 'border-right': (cell.col + 1) % 3 === 0 && cell.col < 8 }"
       />
     </div>
   </div>
@@ -25,6 +25,15 @@ import { computed } from 'vue'
 import SudokuCell from './SudokuCell.vue'
 import { useGameStore } from '../stores/game'
 
+const props = defineProps({
+  selectedIndex: {
+    type: Number,
+    default: null,
+  },
+})
+
+const emit = defineEmits(['select-cell'])
+
 const gameStore = useGameStore()
 
 const structuredBoard = computed(() => {
@@ -34,7 +43,10 @@ const structuredBoard = computed(() => {
     for (let j = 0; j < 9; j++) {
       const index = i * 9 + j
       row.push({
+        index,
+        col: j,
         value: gameStore.board[index] === 0 ? null : gameStore.board[index],
+        notes: gameStore.candidateNotes[index] || [],
         isOriginal: gameStore.fixedCells.includes(index),
       })
     }
@@ -43,11 +55,8 @@ const structuredBoard = computed(() => {
   return board
 })
 
-const handleCellUpdate = ({ row, col, value }) => {
-  const index = row * 9 + col
-  // The value from the input is a string, so we need to parse it
-  const parsedValue = value === null ? 0 : parseInt(value, 10)
-  gameStore.updateCell(index, parsedValue)
+function handleSelect(index) {
+  emit('select-cell', index)
 }
 </script>
 
@@ -70,8 +79,7 @@ const handleCellUpdate = ({ row, col, value }) => {
   grid-template-columns: repeat(9, 1fr);
 }
 
-/* Thicker lines for 3x3 blocks */
-.sudoku-row .border-right {
+.sudoku-row :deep(.border-right) {
   border-right: 2px solid rgba(255, 255, 255, 0.18);
 }
 

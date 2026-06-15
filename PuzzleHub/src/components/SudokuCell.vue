@@ -1,62 +1,113 @@
 <template>
-  <div class="sudoku-cell" :class="{ 'is-fixed': isFixed }">
-    <input
-      type="number"
-      min="1"
-      max="9"
-      :value="modelValue"
-      @input="handleInput"
-      :disabled="isFixed"
-    />
-  </div>
+  <button
+    type="button"
+    class="sudoku-cell"
+    :class="{
+      'is-fixed': isFixed,
+      'is-selected': isSelected,
+      'has-notes': hasNotes,
+      'is-filled': hasValue,
+    }"
+    @click="$emit('select')"
+  >
+    <span v-if="hasValue" class="cell-value">{{ value }}</span>
+
+    <span v-else-if="hasNotes" class="candidate-grid" aria-hidden="true">
+      <span v-for="digit in 9" :key="digit" class="candidate-slot">
+        {{ notes.includes(digit) ? digit : '' }}
+      </span>
+    </span>
+  </button>
 </template>
 
 <script setup>
+import { computed } from 'vue'
+
 const props = defineProps({
-  modelValue: [Number, null],
-  row: Number,
-  col: Number,
-  isFixed: Boolean, // Renamed from isOriginal to isFixed for clarity
+  value: {
+    type: Number,
+    default: 0,
+  },
+  notes: {
+    type: Array,
+    default: () => [],
+  },
+  isFixed: Boolean,
+  isSelected: Boolean,
 })
 
-const emit = defineEmits(['update:modelValue'])
+defineEmits(['select'])
 
-const handleInput = (event) => {
-  let value = parseInt(event.target.value)
-  if (isNaN(value) || value < 1 || value > 9) {
-    value = null // Only allow valid numbers from 1-9
-  }
-  emit('update:modelValue', { row: props.row, col: props.col, value })
-}
+const hasValue = computed(() => Number(props.value) > 0)
+const hasNotes = computed(() => Array.isArray(props.notes) && props.notes.length > 0 && !hasValue.value)
 </script>
 
 <style scoped>
 .sudoku-cell {
+  position: relative;
   width: 100%;
   height: 100%;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  box-sizing: border-box;
   background: rgba(255, 255, 255, 0.02);
-}
-
-.sudoku-cell input {
-  width: 90%;
-  height: 90%;
-  text-align: center;
-  font-size: 1.5em;
-  border: none;
-  background-color: transparent;
-  outline: none;
   color: var(--text);
-  caret-color: var(--accent);
+  cursor: pointer;
+  outline: none;
 }
 
-.sudoku-cell.is-fixed input {
-  font-weight: bold;
-  cursor: not-allowed;
+.sudoku-cell:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sudoku-cell.is-selected {
+  box-shadow: inset 0 0 0 2px rgba(242, 193, 78, 0.8);
+  background: rgba(242, 193, 78, 0.08);
+}
+
+.sudoku-cell.is-fixed {
+  cursor: default;
+}
+
+.sudoku-cell.is-fixed .cell-value {
   color: var(--accent);
+}
+
+.cell-value {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(1.2rem, 3vw, 1.8rem);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.candidate-grid {
+  position: absolute;
+  left: 7%;
+  bottom: 6%;
+  width: 58%;
+  height: 58%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 0.06rem;
+  align-items: end;
+  justify-items: start;
+  pointer-events: none;
+}
+
+.candidate-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 0.62rem;
+  line-height: 1;
+  color: rgba(238, 242, 255, 0.72);
+}
+
+.has-notes .candidate-slot {
+  color: rgba(238, 242, 255, 0.8);
 }
 </style>

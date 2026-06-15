@@ -21,8 +21,8 @@
             <span class="info-value">{{ progress }}%</span>
           </div>
           <div class="info-card">
-            <span class="info-label">Zuletzt geöffnet</span>
-            <span class="info-value">{{ formatDate(gameStore.activePuzzle.last_opened_at) }}</span>
+            <span class="info-label">Tipps</span>
+            <span class="info-value">{{ gameStore.hintsRemaining }}</span>
           </div>
           <div class="info-card">
             <span class="info-label">Zuletzt gespeichert</span>
@@ -30,19 +30,45 @@
           </div>
         </div>
 
+        <div class="mode-switch">
+          <button class="mode-btn" :class="{ active: editMode === 'value' }" @click="editMode = 'value'">
+            Zahl
+          </button>
+          <button class="mode-btn" :class="{ active: editMode === 'notes' }" @click="editMode = 'notes'">
+            Notizen
+          </button>
+        </div>
+
         <div class="action-row">
           <button class="secondary-btn" @click="closePuzzle">Schliessen</button>
+          <button class="hint-btn" @click="handleHint" :disabled="gameStore.hintsRemaining <= 0">
+            Tipp geben
+          </button>
           <button class="danger-btn" @click="removePuzzle">Löschen</button>
         </div>
 
         <p class="note">
-          Wenn ihr die Seite schliesst, bleibt der Fortschritt erhalten und das Puzzle bleibt in
-          eurer gemeinsamen Bibliothek.
+          Wähle erst ein Feld, dann eine Zahl. Im Notizenmodus werden kleine Kandidaten unten links
+          in der Zelle ein- und ausgeblendet.
         </p>
       </div>
 
       <div class="editor-board">
-        <SudokuBoard />
+        <SudokuBoard :selectedIndex="selectedCell" @select-cell="selectedCell = $event" />
+
+        <div class="keypad-panel">
+          <button
+            v-for="digit in digits"
+            :key="digit"
+            class="keypad-btn"
+            @click="handleDigit(digit)"
+          >
+            {{ digit }}
+          </button>
+          <button class="keypad-btn clear" @click="handleClear">Löschen</button>
+        </div>
+
+        <p v-if="actionError" class="inline-error">{{ actionError }}</p>
       </div>
     </section>
 
@@ -61,7 +87,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import SudokuBoard from '../components/SudokuBoard.vue'
 import { useGameStore } from '../stores/game'
@@ -83,6 +109,11 @@ const statusLabel = {
   finished: 'Fertig',
 }
 
+const digits = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+const selectedCell = ref(null)
+const editMode = ref('value')
+const actionError = ref('')
+
 const progress = computed(() => {
   const fixed = gameStore.activePuzzle?.fixed_cells?.length || 0
   const totalPlayable = 81 - fixed
@@ -91,7 +122,7 @@ const progress = computed(() => {
   }
 
   const filled = gameStore.board.filter(
-    (value, index) => !gameStore.fixedCells.includes(index) && value !== 0,
+    (value, index) => !gameStore.fixedCells.includes(index) && value !== 0
   ).length
 
   return Math.round((filled / totalPlayable) * 100)
@@ -100,13 +131,18 @@ const progress = computed(() => {
 onMounted(async () => {
   await gameStore.init()
   await ensurePuzzleLoaded()
+  window.addEventListener('keydown', handleKeyboard)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeyboard)
 })
 
 watch(
   () => route.params.id,
   async () => {
     await ensurePuzzleLoaded()
-  },
+  }
 )
 
 onBeforeRouteLeave(async () => {
@@ -122,6 +158,82 @@ async function ensurePuzzleLoaded() {
 
   if (gameStore.activePuzzle?.id !== puzzleId) {
     await gameStore.openPuzzle(puzzleId)
+  }
+}
+
+function requireSelection() {
+  if (!Number.isInteger(selectedCell.value)) {
+    actionError.value = 'Bitte zuerst ein Feld auswählen.'
+    return false
+  }
+
+  return true
+}
+
+async function handleDigit(digit) {
+  actionError.value = ''
+  if (!requireSelection()) {
+    return
+  }
+
+  try {
+    if (editMode.value === 'notes') {
+      await gameStore.toggleCandidate(selectedCell.value, digit)
+      return
+    }
+
+    await gameStore.updateCell(selectedCell.value, digit)
+  } catch (error) {
+    actionError.value = error?.message || 'Eingabe konnte nicht gespeichert werden.'
+  }
+}
+
+async function handleClear() {
+  actionError.value = ''
+  if (!requireSelection()) {
+    return
+  }
+
+  try {
+    await gameStore.clearCell(selectedCell.value)
+  } catch (error) {
+    actionError.value = error?.message || 'Zelle konnte nicht gelöscht werden.'
+  }
+}
+
+async function handleHint() {
+  actionError.value = ''
+  try {
+    await gameStore.useHint(selectedCell.value)
+  } catch (error) {
+    actionError.value = error?.message || 'Tipp konnte nicht angewendet werden.'
+  }
+}
+
+function handleKeyboard(event) {
+  if (!gameStore.activePuzzle) {
+    return
+  }
+
+  if (event.key >= '1' && event.key <= '9') {
+    event.preventDefault()
+    handleDigit(Number(event.key))
+    return
+  }
+
+  if (event.key === 'Backspace' || event.key === 'Delete') {
+    event.preventDefault()
+    handleClear()
+    return
+  }
+
+  if (event.key.toLowerCase() === 'n') {
+    editMode.value = 'notes'
+    return
+  }
+
+  if (event.key.toLowerCase() === 'v') {
+    editMode.value = 'value'
   }
 }
 
@@ -224,6 +336,26 @@ h2 {
   font-weight: 700;
 }
 
+.mode-switch {
+  display: flex;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.mode-btn {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.mode-btn.active {
+  background: rgba(242, 193, 78, 0.14);
+  border-color: rgba(242, 193, 78, 0.35);
+}
+
 .action-row {
   display: flex;
   flex-wrap: wrap;
@@ -233,6 +365,7 @@ h2 {
 
 .secondary-btn,
 .danger-btn,
+.hint-btn,
 .primary-btn {
   border-radius: 999px;
   padding: 0.85rem 1rem;
@@ -243,6 +376,16 @@ h2 {
 .secondary-btn {
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
+}
+
+.hint-btn {
+  background: rgba(93, 211, 158, 0.16);
+  color: #d7fff0;
+}
+
+.hint-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .danger-btn {
@@ -266,10 +409,35 @@ h2 {
 
 .editor-board {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
   padding: 1rem;
   min-height: 520px;
+}
+
+.keypad-panel {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.65rem;
+  width: min(520px, 100%);
+}
+
+.keypad-btn {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 0.95rem 0.6rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.keypad-btn.clear {
+  grid-column: span 2;
+}
+
+.inline-error {
+  margin: 0.85rem 0 0;
+  color: #ffd4d4;
 }
 
 .editor-empty {
@@ -293,6 +461,14 @@ h2 {
 
   .info-grid {
     grid-template-columns: 1fr;
+  }
+
+  .keypad-panel {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .keypad-btn.clear {
+    grid-column: span 3;
   }
 }
 </style>

@@ -9,6 +9,10 @@ function createEmptyBoard() {
   return Array(81).fill(0)
 }
 
+function createEmptyCandidateNotes() {
+  return Array.from({ length: 81 }, () => [])
+}
+
 function normalizeBoard(board) {
   if (!Array.isArray(board) || board.length !== 81) {
     return createEmptyBoard()
@@ -27,12 +31,31 @@ function normalizeCells(cells) {
     .filter((value) => Number.isInteger(value) && value >= 0 && value < 81)
 }
 
+function normalizeCandidateNotes(notes) {
+  const empty = createEmptyCandidateNotes()
+
+  if (!Array.isArray(notes)) {
+    return empty
+  }
+
+  return empty.map((fallback, index) => {
+    const cellNotes = Array.isArray(notes[index]) ? notes[index] : fallback
+    return [...new Set(cellNotes.map((value) => Number(value)).filter((value) => value >= 1 && value <= 9))].sort(
+      (a, b) => a - b
+    )
+  })
+}
+
 function arraysEqual(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
     return false
   }
 
   return a.every((value, index) => Number(value) === Number(b[index]))
+}
+
+function hasCandidateNotes(candidateNotes) {
+  return Array.isArray(candidateNotes) && candidateNotes.some((entry) => Array.isArray(entry) && entry.length > 0)
 }
 
 function getFixedCells(board) {
@@ -45,7 +68,7 @@ function getFixedCells(board) {
   }, [])
 }
 
-function derivePuzzleStatus(board, initialBoard, solution, forcePaused = false) {
+function derivePuzzleStatus(board, initialBoard, solution, candidateNotes = [], forcePaused = false) {
   const normalizedBoard = normalizeBoard(board)
   const normalizedInitialBoard = normalizeBoard(initialBoard)
   const normalizedSolution = normalizeBoard(solution)
@@ -58,7 +81,7 @@ function derivePuzzleStatus(board, initialBoard, solution, forcePaused = false) 
     return 'paused'
   }
 
-  if (arraysEqual(normalizedBoard, normalizedInitialBoard)) {
+  if (arraysEqual(normalizedBoard, normalizedInitialBoard) && !hasCandidateNotes(candidateNotes)) {
     return 'new'
   }
 
@@ -76,6 +99,8 @@ function normalizePuzzleRow(row) {
     initial_board: normalizeBoard(row.initial_board),
     solution: normalizeBoard(row.solution),
     fixed_cells: normalizeCells(row.fixed_cells),
+    hints_remaining: Number.isFinite(Number(row.hints_remaining)) ? Number(row.hints_remaining) : 3,
+    candidate_notes: normalizeCandidateNotes(row.candidate_notes),
   }
 }
 
@@ -110,6 +135,8 @@ export const useGameStore = defineStore('game', () => {
   const board = ref(createEmptyBoard())
   const fixedCells = ref([])
   const solution = ref(createEmptyBoard())
+  const candidateNotes = ref(createEmptyCandidateNotes())
+  const hintsRemaining = ref(3)
   const isLoading = ref(false)
   const isInitialized = ref(false)
   const errorMessage = ref('')
@@ -200,11 +227,7 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function subscribeToLibrary() {
-    if (libraryChannel.value) {
-      return
-    }
-
-    if (!coupleId.value) {
+    if (libraryChannel.value || !coupleId.value) {
       return
     }
 
@@ -228,13 +251,14 @@ export const useGameStore = defineStore('game', () => {
 
           if (payload.eventType === 'UPDATE') {
             const nextPuzzle = normalizePuzzleRow(payload.new)
-          if (nextPuzzle?.deleted_at) {
-            removePuzzle(nextPuzzle.id)
-            if (activePuzzle.value?.id === nextPuzzle.id) {
-              clearActivePuzzle(true)
+
+            if (nextPuzzle?.deleted_at) {
+              removePuzzle(nextPuzzle.id)
+              if (activePuzzle.value?.id === nextPuzzle.id) {
+                clearActivePuzzle(true)
+              }
+              return
             }
-            return
-          }
 
             upsertPuzzle(nextPuzzle)
             if (activePuzzle.value?.id === nextPuzzle?.id) {
@@ -276,6 +300,58 @@ export const useGameStore = defineStore('game', () => {
     return new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
   }
 
+  async function saveActivePuzzle(patch, options = {}) {
+    const { persist = true } = options
+
+    if (!activePuzzle.value || !gameId.value) {
+      return
+    }
+
+    const nextPuzzle = {
+      ...activePuzzle.value,
+      ...patch,
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, 'board')) {
+      nextPuzzle.board = normalizeBoard(patch.board)
+      board.value = nextPuzzle.board
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, 'candidate_notes')) {
+      nextPuzzle.candidate_notes = normalizeCandidateNotes(patch.candidate_notes)
+      candidateNotes.value = nextPuzzle.candidate_notes
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, 'hints_remaining')) {
+      nextPuzzle.hints_remaining = Math.max(0, Number(patch.hints_remaining) || 0)
+      hintsRemaining.value = nextPuzzle.hints_remaining
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, 'fixed_cells')) {
+      nextPuzzle.fixed_cells = normalizeCells(patch.fixed_cells)
+      fixedCells.value = nextPuzzle.fixed_cells
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, 'solution')) {
+      nextPuzzle.solution = normalizeBoard(patch.solution)
+      solution.value = nextPuzzle.solution
+    }
+
+    activePuzzle.value = nextPuzzle
+
+    if (!persist) {
+      return nextPuzzle
+    }
+
+    const { error } = await supabase.from('sudoku_sessions').update(patch).eq('id', gameId.value)
+    if (error) {
+      errorMessage.value = error.message
+      throw error
+    }
+
+    return nextPuzzle
+  }
+
   async function startNewGame(difficulty = 'easy') {
     if (!authStore.user) {
       throw new Error('Du musst eingeloggt sein.')
@@ -292,6 +368,7 @@ export const useGameStore = defineStore('game', () => {
       const solutionBoard = puzzleResponse.solution.split('').map(Number)
       const fixed = getFixedCells(initialBoard)
       const now = new Date().toISOString()
+      const emptyNotes = createEmptyCandidateNotes()
 
       const { data, error } = await supabase
         .from('sudoku_sessions')
@@ -305,6 +382,8 @@ export const useGameStore = defineStore('game', () => {
           initial_board: initialBoard,
           fixed_cells: fixed,
           solution: solutionBoard,
+          candidate_notes: emptyNotes,
+          hints_remaining: 3,
           status: 'new',
           deleted_at: null,
           last_opened_at: now,
@@ -385,50 +464,140 @@ export const useGameStore = defineStore('game', () => {
   }
 
   async function updateCell(index, value) {
-    if (!activePuzzle.value) {
-      return
-    }
-
-    if (fixedCells.value.includes(index)) {
+    if (!activePuzzle.value || fixedCells.value.includes(index)) {
       return
     }
 
     const nextBoard = [...board.value]
     nextBoard[index] = Number(value) || 0
-    await persistActivePuzzle(nextBoard)
-  }
-
-  async function persistActivePuzzle(nextBoard, forcePaused = false) {
-    if (!activePuzzle.value || !gameId.value) {
-      return
-    }
-
+    const nextNotes = [...candidateNotes.value]
+    nextNotes[index] = []
     const nextStatus = derivePuzzleStatus(
       nextBoard,
       activePuzzle.value.initial_board,
       solution.value,
-      forcePaused
+      nextNotes
+    )
+
+    await saveActivePuzzle({
+      board: nextBoard,
+      candidate_notes: nextNotes,
+      status: nextStatus,
+      updated_at: new Date().toISOString(),
+      last_opened_at: new Date().toISOString(),
+      last_edited_by: authStore.user?.id || null,
+    })
+  }
+
+  async function toggleCandidate(index, candidate) {
+    if (!activePuzzle.value || fixedCells.value.includes(index)) {
+      return
+    }
+
+    const digit = Number(candidate)
+    if (!Number.isInteger(digit) || digit < 1 || digit > 9) {
+      return
+    }
+
+    if (board.value[index] !== 0) {
+      return
+    }
+
+    const nextNotes = candidateNotes.value.map((entry, noteIndex) => {
+      if (noteIndex !== index) {
+        return entry
+      }
+
+      const existing = Array.isArray(entry) ? [...entry] : []
+      const next = existing.includes(digit)
+        ? existing.filter((value) => value !== digit)
+        : [...existing, digit]
+
+      return next.sort((a, b) => a - b)
+    })
+    const nextStatus = derivePuzzleStatus(
+      board.value,
+      activePuzzle.value.initial_board,
+      solution.value,
+      nextNotes
+    )
+
+    await saveActivePuzzle({
+      board: [...board.value],
+      candidate_notes: nextNotes,
+      status: nextStatus,
+      updated_at: new Date().toISOString(),
+      last_opened_at: new Date().toISOString(),
+      last_edited_by: authStore.user?.id || null,
+    })
+  }
+
+  async function clearCell(index) {
+    if (!activePuzzle.value || fixedCells.value.includes(index)) {
+      return
+    }
+
+    const nextBoard = [...board.value]
+    nextBoard[index] = 0
+    const nextNotes = [...candidateNotes.value]
+    nextNotes[index] = []
+    const nextStatus = derivePuzzleStatus(
+      nextBoard,
+      activePuzzle.value.initial_board,
+      solution.value,
+      nextNotes
+    )
+
+    await saveActivePuzzle({
+      board: nextBoard,
+      candidate_notes: nextNotes,
+      status: nextStatus,
+      updated_at: new Date().toISOString(),
+      last_opened_at: new Date().toISOString(),
+      last_edited_by: authStore.user?.id || null,
+    })
+  }
+
+  async function useHint(index) {
+    if (!activePuzzle.value || !gameId.value) {
+      return
+    }
+
+    if (hintsRemaining.value <= 0) {
+      throw new Error('Keine Tipps mehr verfügbar.')
+    }
+
+    const fallbackIndex = board.value.findIndex((value, cellIndex) => {
+      return value === 0 && !fixedCells.value.includes(cellIndex)
+    })
+    const targetIndex = Number.isInteger(index) ? index : fallbackIndex
+
+    if (targetIndex < 0 || fixedCells.value.includes(targetIndex)) {
+      throw new Error('Bitte wähle ein leeres Feld für den Tipp aus.')
+    }
+
+    const nextBoard = [...board.value]
+    nextBoard[targetIndex] = solution.value[targetIndex]
+    const nextNotes = [...candidateNotes.value]
+    nextNotes[targetIndex] = []
+    const nextHints = Math.max(0, hintsRemaining.value - 1)
+    const nextStatus = derivePuzzleStatus(
+      nextBoard,
+      activePuzzle.value.initial_board,
+      solution.value,
+      nextNotes
     )
     const now = new Date().toISOString()
-    const nextPayload = {
+
+    await saveActivePuzzle({
       board: nextBoard,
+      candidate_notes: nextNotes,
+      hints_remaining: nextHints,
       status: nextStatus,
       updated_at: now,
       last_opened_at: now,
       last_edited_by: authStore.user?.id || null,
-    }
-
-    board.value = normalizeBoard(nextBoard)
-    activePuzzle.value = {
-      ...activePuzzle.value,
-      ...nextPayload,
-    }
-
-    const { error } = await supabase.from('sudoku_sessions').update(nextPayload).eq('id', gameId.value)
-    if (error) {
-      errorMessage.value = error.message
-      throw error
-    }
+    })
   }
 
   async function closePuzzle() {
@@ -438,10 +607,25 @@ export const useGameStore = defineStore('game', () => {
 
     const shouldPause = !isActivePuzzleFinished.value
     const nextBoard = [...board.value]
+    const nextNotes = [...candidateNotes.value]
 
     try {
       if (shouldPause) {
-        await persistActivePuzzle(nextBoard, true)
+        const status = derivePuzzleStatus(
+          nextBoard,
+          activePuzzle.value.initial_board,
+          solution.value,
+          nextNotes,
+          true
+        )
+        await saveActivePuzzle({
+          board: nextBoard,
+          candidate_notes: nextNotes,
+          status,
+          updated_at: new Date().toISOString(),
+          last_opened_at: new Date().toISOString(),
+          last_edited_by: authStore.user?.id || null,
+        })
       }
     } finally {
       clearActivePuzzle(true)
@@ -488,6 +672,8 @@ export const useGameStore = defineStore('game', () => {
     board.value = createEmptyBoard()
     fixedCells.value = []
     solution.value = createEmptyBoard()
+    candidateNotes.value = createEmptyCandidateNotes()
+    hintsRemaining.value = 3
   }
 
   function syncActivePuzzle(puzzle) {
@@ -498,6 +684,8 @@ export const useGameStore = defineStore('game', () => {
     board.value = normalized.board
     fixedCells.value = normalized.fixed_cells
     solution.value = normalized.solution
+    candidateNotes.value = normalized.candidate_notes
+    hintsRemaining.value = normalized.hints_remaining
   }
 
   function subscribeToActivePuzzle(puzzleId) {
@@ -579,6 +767,8 @@ export const useGameStore = defineStore('game', () => {
     board.value = createEmptyBoard()
     fixedCells.value = []
     solution.value = createEmptyBoard()
+    candidateNotes.value = createEmptyCandidateNotes()
+    hintsRemaining.value = 3
     isLoading.value = false
     isInitialized.value = false
     errorMessage.value = ''
@@ -591,28 +781,32 @@ export const useGameStore = defineStore('game', () => {
   return {
     activePuzzle,
     board,
+    candidateNotes,
     coupleId,
     coupleMember,
+    clearCell,
     deletePuzzle,
     endGame,
     errorMessage,
     fixedCells,
     gameId,
     gameStatus,
+    hintsRemaining,
     init,
     isActivePuzzleFinished,
     isInitialized,
     isLoading,
     openPuzzle,
-    persistActivePuzzle,
-    puzzles,
-    puzzlesByDifficulty,
     refreshLibrary,
     resetStore,
     selectedDifficulty,
     solution,
     startNewGame,
+    toggleCandidate,
     updateCell,
+    useHint,
     closePuzzle,
+    puzzles,
+    puzzlesByDifficulty,
   }
 })
