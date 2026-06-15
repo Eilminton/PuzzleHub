@@ -5,6 +5,7 @@
     :class="{
       'is-fixed': isFixed,
       'is-selected': isSelected,
+      'is-related': isRelated,
       'has-notes': hasNotes,
       'is-filled': hasValue,
     }"
@@ -34,6 +35,7 @@ const props = defineProps({
   },
   isFixed: Boolean,
   isSelected: Boolean,
+  isRelated: Boolean,
 })
 
 defineEmits(['select'])
@@ -59,9 +61,19 @@ const hasNotes = computed(() => Array.isArray(props.notes) && props.notes.length
   background: rgba(255, 255, 255, 0.05);
 }
 
+.sudoku-cell.is-related {
+  background: rgba(242, 193, 78, 0.04);
+}
+
 .sudoku-cell.is-selected {
-  box-shadow: inset 0 0 0 2px rgba(242, 193, 78, 0.8);
-  background: rgba(242, 193, 78, 0.08);
+  box-shadow:
+    inset 0 0 0 2px rgba(242, 193, 78, 0.95),
+    0 0 0 3px rgba(242, 193, 78, 0.18),
+    0 10px 22px rgba(0, 0, 0, 0.22);
+  background:
+    radial-gradient(circle at center, rgba(242, 193, 78, 0.18), rgba(242, 193, 78, 0.08) 55%, transparent 100%),
+    rgba(242, 193, 78, 0.08);
+  z-index: 2;
 }
 
 .sudoku-cell.is-fixed {

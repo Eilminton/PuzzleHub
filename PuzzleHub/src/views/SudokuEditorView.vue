@@ -31,12 +31,23 @@
         </div>
 
         <div class="mode-switch">
-          <button class="mode-btn" :class="{ active: editMode === 'value' }" @click="editMode = 'value'">
-            Zahl
-          </button>
-          <button class="mode-btn" :class="{ active: editMode === 'notes' }" @click="editMode = 'notes'">
-            Notizen
-          </button>
+          <div class="mode-switch__rail">
+            <button
+              class="mode-btn"
+              :class="{ active: editMode === 'value' }"
+              @click="editMode = 'value'"
+            >
+              <span class="mode-btn__label">Zahl</span>
+            </button>
+            <button
+              class="mode-btn"
+              :class="{ active: editMode === 'notes' }"
+              @click="editMode = 'notes'"
+            >
+              <span class="mode-btn__label">Notizen</span>
+            </button>
+          </div>
+          <p class="mode-hint">Tastatur: <kbd>N</kbd> für Notizen, <kbd>V</kbd> für Zahlen</p>
         </div>
 
         <div class="action-row">
@@ -54,6 +65,18 @@
       </div>
 
       <div class="editor-board">
+        <div class="board-hud">
+          <div>
+            <span class="board-hud__label">Aktiv</span>
+            <strong v-if="Number.isInteger(selectedCell)">Feld {{ selectedCell + 1 }}</strong>
+            <strong v-else>Kein Feld gewählt</strong>
+          </div>
+          <div>
+            <span class="board-hud__label">Modus</span>
+            <strong>{{ editMode === 'notes' ? 'Notizen' : 'Zahl' }}</strong>
+          </div>
+        </div>
+
         <SudokuBoard :selectedIndex="selectedCell" @select-cell="selectedCell = $event" />
 
         <div class="keypad-panel">
@@ -122,7 +145,7 @@ const progress = computed(() => {
   }
 
   const filled = gameStore.board.filter(
-    (value, index) => !gameStore.fixedCells.includes(index) && value !== 0
+    (value, index) => !gameStore.fixedCells.includes(index) && value !== 0,
   ).length
 
   return Math.round((filled / totalPlayable) * 100)
@@ -142,7 +165,7 @@ watch(
   () => route.params.id,
   async () => {
     await ensurePuzzleLoaded()
-  }
+  },
 )
 
 onBeforeRouteLeave(async () => {
@@ -337,23 +360,72 @@ h2 {
 }
 
 .mode-switch {
-  display: flex;
+  display: grid;
   gap: 0.65rem;
   margin-top: 1rem;
 }
 
-.mode-btn {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
-  padding: 0.75rem 1rem;
+.mode-switch__rail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  padding: 0.4rem;
+  border-radius: 22px;
   background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.mode-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.12rem;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  padding: 0.9rem 1rem;
+  background: transparent;
   color: var(--text);
   cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    background 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .mode-btn.active {
-  background: rgba(242, 193, 78, 0.14);
-  border-color: rgba(242, 193, 78, 0.35);
+  background: linear-gradient(135deg, rgba(242, 193, 78, 0.22), rgba(240, 138, 36, 0.15));
+  border-color: rgba(242, 193, 78, 0.4);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.16);
+  transform: translateY(-1px);
+}
+
+.mode-btn__label {
+  font-size: 0.98rem;
+  font-weight: 700;
+}
+
+.mode-btn__meta {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.mode-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.mode-hint kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.1rem 0.4rem;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font-size: 0.78rem;
 }
 
 .action-row {
@@ -415,6 +487,27 @@ h2 {
   min-height: 520px;
 }
 
+.board-hud {
+  width: min(520px, 100%);
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.board-hud__label {
+  display: block;
+  margin-bottom: 0.12rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
 .keypad-panel {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -463,12 +556,20 @@ h2 {
     grid-template-columns: 1fr;
   }
 
+  .mode-switch__rail {
+    grid-template-columns: 1fr;
+  }
+
   .keypad-panel {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .keypad-btn.clear {
     grid-column: span 3;
+  }
+
+  .board-hud {
+    flex-direction: column;
   }
 }
 </style>

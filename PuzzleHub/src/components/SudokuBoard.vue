@@ -13,6 +13,7 @@
         :notes="cell.notes"
         :isFixed="cell.isOriginal"
         :isSelected="selectedIndex === cell.index"
+        :isRelated="isRelatedCell(cell.index)"
         @select="handleSelect(cell.index)"
         :class="{ 'border-right': (cell.col + 1) % 3 === 0 && cell.col < 8 }"
       />
@@ -57,6 +58,29 @@ const structuredBoard = computed(() => {
 
 function handleSelect(index) {
   emit('select-cell', index)
+}
+
+function isRelatedCell(index) {
+  if (!Number.isInteger(props.selectedIndex)) {
+    return false
+  }
+
+  if (props.selectedIndex === index) {
+    return true
+  }
+
+  const selectedRow = Math.floor(props.selectedIndex / 9)
+  const selectedCol = props.selectedIndex % 9
+  const row = Math.floor(index / 9)
+  const col = index % 9
+
+  const sameRow = row === selectedRow
+  const sameCol = col === selectedCol
+  const sameBlock =
+    Math.floor(row / 3) === Math.floor(selectedRow / 3) &&
+    Math.floor(col / 3) === Math.floor(selectedCol / 3)
+
+  return sameRow || sameCol || sameBlock
 }
 </script>
 
