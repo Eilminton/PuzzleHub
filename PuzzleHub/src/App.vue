@@ -1,24 +1,53 @@
 <template>
   <div class="app-shell">
     <header v-if="authStore.user" class="app-header">
-      <div class="brand">
-        <p class="eyebrow">Couple Puzzle Hub</p>
-        <h1>PuzzleHub</h1>
+      <div class="header-top">
+        <div class="brand">
+          <p class="eyebrow">Couple Puzzle Hub</p>
+          <h1>PuzzleHub</h1>
+        </div>
+
+        <button
+          type="button"
+          class="menu-toggle"
+          :aria-expanded="mobileNavOpen"
+          aria-controls="mobile-navigation"
+          @click="mobileNavOpen = !mobileNavOpen"
+        >
+          <span class="menu-toggle__label">{{ mobileNavOpen ? 'Schliessen' : 'Menü' }}</span>
+          <span class="menu-toggle__icon" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        </button>
       </div>
 
-      <div class="user-badge" aria-label="Angemeldeter Benutzer">
-        <span class="user-badge__label">Angemeldet als</span>
-        <strong class="user-badge__name">{{ displayName }}</strong>
-      </div>
+      <nav id="mobile-navigation" class="header-nav" :class="{ open: mobileNavOpen }">
+        <div class="user-badge" aria-label="Angemeldeter Benutzer">
+          <span class="user-badge__label">Angemeldet als</span>
+          <strong class="user-badge__name">{{ displayName }}</strong>
+        </div>
 
-      <nav class="header-nav">
-        <RouterLink :to="{ name: 'home' }" class="nav-link" :class="{ active: isHome }">
-          Hub
-        </RouterLink>
-        <RouterLink :to="{ name: 'sudoku-library' }" class="nav-link" :class="{ active: isSudoku }">
-          Sudoku
-        </RouterLink>
-        <button @click="handleLogout" class="logout-btn">Abmelden</button>
+        <div class="nav-links">
+          <RouterLink
+            :to="{ name: 'home' }"
+            class="nav-link"
+            :class="{ active: isHome }"
+            @click="mobileNavOpen = false"
+          >
+            Hub
+          </RouterLink>
+          <RouterLink
+            :to="{ name: 'sudoku-library' }"
+            class="nav-link"
+            :class="{ active: isSudoku }"
+            @click="mobileNavOpen = false"
+          >
+            Sudoku
+          </RouterLink>
+          <button type="button" @click="handleLogout" class="logout-btn">Abmelden</button>
+        </div>
       </nav>
     </header>
 
@@ -29,7 +58,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import { useGameStore } from './stores/game'
@@ -38,14 +67,23 @@ const authStore = useAuthStore()
 const gameStore = useGameStore()
 const router = useRouter()
 const route = useRoute()
+const mobileNavOpen = ref(false)
 
 const isHome = computed(() => route.name === 'home')
 const isSudoku = computed(() => route.name === 'sudoku-library' || route.name === 'sudoku-editor')
 const displayName = computed(() => gameStore.currentPlayerName)
 
+watch(
+  () => route.fullPath,
+  () => {
+    mobileNavOpen.value = false
+  },
+)
+
 const handleLogout = async () => {
   try {
     await authStore.logout()
+    mobileNavOpen.value = false
     router.push({ name: 'login' })
   } catch (error) {
     console.error('Logout error:', error.message)
@@ -76,11 +114,7 @@ body {
     radial-gradient(circle at top left, rgba(242, 193, 78, 0.2), transparent 28%),
     radial-gradient(circle at top right, rgba(93, 211, 158, 0.14), transparent 24%),
     linear-gradient(180deg, #09111f 0%, #07101b 45%, #050b14 100%);
-  font-family:
-    'Avenir Next',
-    'Trebuchet MS',
-    'Segoe UI',
-    sans-serif;
+  font-family: 'Avenir Next', 'Trebuchet MS', 'Segoe UI', sans-serif;
 }
 
 a {
@@ -99,10 +133,8 @@ textarea {
 }
 
 .app-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  display: grid;
+  gap: 0.9rem;
   padding: 1rem 1.25rem;
   background: rgba(4, 9, 17, 0.74);
   border-bottom: 1px solid var(--panel-border);
@@ -110,6 +142,13 @@ textarea {
   position: sticky;
   top: 0;
   z-index: 20;
+}
+
+.header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
 .brand h1 {
@@ -129,9 +168,8 @@ textarea {
 .header-nav {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  gap: 0.9rem;
+  justify-content: space-between;
 }
 
 .user-badge {
@@ -145,6 +183,14 @@ textarea {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   min-width: 180px;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .user-badge__label {
@@ -189,6 +235,37 @@ textarea {
   cursor: pointer;
 }
 
+.menu-toggle {
+  display: none;
+  align-items: center;
+  gap: 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.72rem 0.95rem;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+}
+
+.menu-toggle__label {
+  font-size: 0.92rem;
+  letter-spacing: 0.02em;
+}
+
+.menu-toggle__icon {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.22rem;
+}
+
+.menu-toggle__icon span {
+  display: block;
+  width: 1.15rem;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
 .nav-link:hover,
 .logout-btn:hover {
   transform: translateY(-1px);
@@ -200,17 +277,43 @@ textarea {
 
 @media (max-width: 720px) {
   .app-header {
-    align-items: flex-start;
-    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .menu-toggle {
+    display: inline-flex;
   }
 
   .header-nav {
     width: 100%;
-    justify-content: flex-start;
+    display: none;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .header-nav.open {
+    display: flex;
+  }
+
+  .nav-links {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .nav-link,
+  .logout-btn,
+  .user-badge {
+    width: 100%;
   }
 
   .user-badge {
     align-items: flex-start;
+  }
+
+  .nav-link,
+  .logout-btn {
+    text-align: center;
   }
 }
 </style>
