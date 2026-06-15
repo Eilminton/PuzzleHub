@@ -135,7 +135,8 @@ textarea {
 .app-header {
   display: grid;
   gap: 0.9rem;
-  padding: 1rem 1.25rem;
+  width: 100%;
+  padding: clamp(0.85rem, 2.5vw, 1rem) clamp(0.85rem, 3vw, 1.25rem);
   background: rgba(4, 9, 17, 0.74);
   border-bottom: 1px solid var(--panel-border);
   backdrop-filter: blur(14px);
@@ -149,6 +150,7 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  width: 100%;
 }
 
 .brand h1 {
@@ -170,6 +172,7 @@ textarea {
   align-items: center;
   gap: 0.9rem;
   justify-content: space-between;
+  width: 100%;
 }
 
 .user-badge {
@@ -182,7 +185,9 @@ textarea {
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  min-width: 180px;
+  min-width: 0;
+  flex: 1 1 180px;
+  max-width: 100%;
 }
 
 .nav-links {
@@ -309,11 +314,18 @@ textarea {
 
   .user-badge {
     align-items: flex-start;
+    flex: 1 1 auto;
   }
 
   .nav-link,
   .logout-btn {
     text-align: center;
+  }
+}
+
+@media (min-width: 721px) {
+  .app-header {
+    padding-inline: min(2rem, 3vw);
   }
 }
 </style>

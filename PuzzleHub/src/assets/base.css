@@ -83,4 +83,10 @@ body {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: clip;
+}
+
+#app {
+  min-height: 100vh;
+  overflow-x: clip;
 }
