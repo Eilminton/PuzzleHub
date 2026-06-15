@@ -40,9 +40,11 @@ function normalizeCandidateNotes(notes) {
 
   return empty.map((fallback, index) => {
     const cellNotes = Array.isArray(notes[index]) ? notes[index] : fallback
-    return [...new Set(cellNotes.map((value) => Number(value)).filter((value) => value >= 1 && value <= 9))].sort(
-      (a, b) => a - b
-    )
+    return [
+      ...new Set(
+        cellNotes.map((value) => Number(value)).filter((value) => value >= 1 && value <= 9),
+      ),
+    ].sort((a, b) => a - b)
   })
 }
 
@@ -55,7 +57,10 @@ function arraysEqual(a, b) {
 }
 
 function hasCandidateNotes(candidateNotes) {
-  return Array.isArray(candidateNotes) && candidateNotes.some((entry) => Array.isArray(entry) && entry.length > 0)
+  return (
+    Array.isArray(candidateNotes) &&
+    candidateNotes.some((entry) => Array.isArray(entry) && entry.length > 0)
+  )
 }
 
 function getFixedCells(board) {
@@ -68,7 +73,13 @@ function getFixedCells(board) {
   }, [])
 }
 
-function derivePuzzleStatus(board, initialBoard, solution, candidateNotes = [], forcePaused = false) {
+function derivePuzzleStatus(
+  board,
+  initialBoard,
+  solution,
+  candidateNotes = [],
+  forcePaused = false,
+) {
   const normalizedBoard = normalizeBoard(board)
   const normalizedInitialBoard = normalizeBoard(initialBoard)
   const normalizedSolution = normalizeBoard(solution)
@@ -125,12 +136,26 @@ function buildPuzzleTitle(difficulty) {
   return `Sudoku ${labels[getDifficultyOrder(difficulty)]} ${stamp}`
 }
 
+function formatFallbackName(user) {
+  const fullName = user?.user_metadata?.display_name || user?.user_metadata?.name
+  if (typeof fullName === 'string' && fullName.trim()) {
+    return fullName.trim()
+  }
+
+  if (typeof user?.email === 'string' && user.email.includes('@')) {
+    return user.email.split('@')[0]
+  }
+
+  return 'Spieler'
+}
+
 export const useGameStore = defineStore('game', () => {
   const authStore = useAuthStore()
 
   const coupleId = ref(null)
   const coupleMember = ref(null)
   const puzzles = ref([])
+  const coupleMembers = ref([])
   const activePuzzle = ref(null)
   const board = ref(createEmptyBoard())
   const fixedCells = ref([])
@@ -147,13 +172,26 @@ export const useGameStore = defineStore('game', () => {
   const gameStatus = computed(() => (activePuzzle.value ? 'active' : 'idle'))
   const selectedDifficulty = computed(() => activePuzzle.value?.difficulty || null)
   const isActivePuzzleFinished = computed(
-    () => activePuzzle.value?.status === 'finished' || arraysEqual(board.value, solution.value)
+    () => activePuzzle.value?.status === 'finished' || arraysEqual(board.value, solution.value),
   )
+  const currentPlayerName = computed(() => {
+    const current = coupleMembers.value.find((member) => member.user_id === authStore.user?.id)
+    return current?.display_name?.trim() || formatFallbackName(authStore.user)
+  })
+  const partnerPlayerName = computed(() => {
+    const partner = coupleMembers.value.find((member) => member.user_id !== authStore.user?.id)
+    return partner?.display_name?.trim() || 'Partner'
+  })
+  const coupleRosterLabel = computed(() => {
+    const current = currentPlayerName.value
+    const partner = partnerPlayerName.value
+    return `${current} & ${partner}`
+  })
 
   const puzzlesByDifficulty = computed(() => {
     return DIFFICULTIES.reduce((groups, difficulty) => {
       groups[difficulty] = puzzles.value.filter(
-        (puzzle) => getDifficultyOrder(puzzle.difficulty) === difficulty
+        (puzzle) => getDifficultyOrder(puzzle.difficulty) === difficulty,
       )
       return groups
     }, {})
@@ -170,6 +208,7 @@ export const useGameStore = defineStore('game', () => {
 
     try {
       await ensureCoupleScope()
+      await refreshCoupleMembers()
       await refreshLibrary()
       subscribeToLibrary()
       isInitialized.value = true
@@ -226,6 +265,24 @@ export const useGameStore = defineStore('game', () => {
     puzzles.value = (data || []).map(normalizePuzzleRow).filter(Boolean)
   }
 
+  async function refreshCoupleMembers() {
+    const scopeId = await ensureCoupleScope()
+
+    const { data, error } = await supabase
+      .from('couple_members')
+      .select('*')
+      .eq('couple_id', scopeId)
+
+    if (error) {
+      throw error
+    }
+
+    coupleMembers.value = (data || []).map((member) => ({
+      ...member,
+      display_name: typeof member.display_name === 'string' ? member.display_name.trim() : '',
+    }))
+  }
+
   function subscribeToLibrary() {
     if (libraryChannel.value || !coupleId.value) {
       return
@@ -273,7 +330,7 @@ export const useGameStore = defineStore('game', () => {
               clearActivePuzzle(true)
             }
           }
-        }
+        },
       )
       .subscribe()
   }
@@ -476,7 +533,7 @@ export const useGameStore = defineStore('game', () => {
       nextBoard,
       activePuzzle.value.initial_board,
       solution.value,
-      nextNotes
+      nextNotes,
     )
 
     await saveActivePuzzle({
@@ -519,7 +576,7 @@ export const useGameStore = defineStore('game', () => {
       board.value,
       activePuzzle.value.initial_board,
       solution.value,
-      nextNotes
+      nextNotes,
     )
 
     await saveActivePuzzle({
@@ -545,7 +602,7 @@ export const useGameStore = defineStore('game', () => {
       nextBoard,
       activePuzzle.value.initial_board,
       solution.value,
-      nextNotes
+      nextNotes,
     )
 
     await saveActivePuzzle({
@@ -585,7 +642,7 @@ export const useGameStore = defineStore('game', () => {
       nextBoard,
       activePuzzle.value.initial_board,
       solution.value,
-      nextNotes
+      nextNotes,
     )
     const now = new Date().toISOString()
 
@@ -616,7 +673,7 @@ export const useGameStore = defineStore('game', () => {
           activePuzzle.value.initial_board,
           solution.value,
           nextNotes,
-          true
+          true,
         )
         await saveActivePuzzle({
           board: nextBoard,
@@ -718,7 +775,7 @@ export const useGameStore = defineStore('game', () => {
 
           syncActivePuzzle(nextPuzzle)
           upsertPuzzle(nextPuzzle)
-        }
+        },
       )
       .subscribe()
   }
@@ -762,6 +819,7 @@ export const useGameStore = defineStore('game', () => {
     activePuzzleChannel.value = null
     coupleId.value = null
     coupleMember.value = null
+    coupleMembers.value = []
     puzzles.value = []
     activePuzzle.value = null
     board.value = createEmptyBoard()
@@ -784,6 +842,7 @@ export const useGameStore = defineStore('game', () => {
     candidateNotes,
     coupleId,
     coupleMember,
+    coupleMembers,
     clearCell,
     deletePuzzle,
     endGame,
@@ -798,10 +857,14 @@ export const useGameStore = defineStore('game', () => {
     isLoading,
     openPuzzle,
     refreshLibrary,
+    refreshCoupleMembers,
     resetStore,
+    currentPlayerName,
     selectedDifficulty,
     solution,
     startNewGame,
+    partnerPlayerName,
+    coupleRosterLabel,
     toggleCandidate,
     updateCell,
     useHint,

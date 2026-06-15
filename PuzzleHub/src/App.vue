@@ -6,6 +6,11 @@
         <h1>PuzzleHub</h1>
       </div>
 
+      <div class="user-badge" aria-label="Angemeldeter Benutzer">
+        <span class="user-badge__label">Angemeldet als</span>
+        <strong class="user-badge__name">{{ displayName }}</strong>
+      </div>
+
       <nav class="header-nav">
         <RouterLink :to="{ name: 'home' }" class="nav-link" :class="{ active: isHome }">
           Hub
@@ -27,13 +32,16 @@
 import { computed } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
+import { useGameStore } from './stores/game'
 
 const authStore = useAuthStore()
+const gameStore = useGameStore()
 const router = useRouter()
 const route = useRoute()
 
 const isHome = computed(() => route.name === 'home')
 const isSudoku = computed(() => route.name === 'sudoku-library' || route.name === 'sudoku-editor')
+const displayName = computed(() => gameStore.currentPlayerName)
 
 const handleLogout = async () => {
   try {
@@ -126,6 +134,33 @@ textarea {
   justify-content: flex-end;
 }
 
+.user-badge {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  padding: 0.65rem 1rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  min-width: 180px;
+}
+
+.user-badge__label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.user-badge__name {
+  color: var(--text);
+  font-size: 0.98rem;
+  font-weight: 700;
+  text-align: center;
+}
+
 .nav-link,
 .logout-btn {
   border-radius: 999px;
@@ -172,6 +207,10 @@ textarea {
   .header-nav {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .user-badge {
+    align-items: flex-start;
   }
 }
 </style>
