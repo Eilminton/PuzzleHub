@@ -786,7 +786,7 @@ export const useGameStore = defineStore('game', () => {
       throw new Error('API key for youdosudoku.com is not configured.')
     }
 
-    const response = await fetch('/api/', {
+    const response = await fetch('https://youdosudoku.com/api', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
