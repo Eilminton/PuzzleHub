@@ -785,7 +785,7 @@ export const useGameStore = defineStore('game', () => {
   const apiKey = import.meta.env.VITE_YOUDOSUDOKU_API_KEY
 
   try {
-    const response = await fetch('https://youdosudoku.com/api/', {
+    const response = await fetch('https://www.youdosudoku.com/api/', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
