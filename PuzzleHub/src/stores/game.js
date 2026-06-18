@@ -780,12 +780,11 @@ export const useGameStore = defineStore('game', () => {
       .subscribe()
   }
 
+  
   async function fetchSudokuFromAPI(difficulty) {
-    const apiKey = import.meta.env.VITE_YOUDOSUDOKU_API_KEY
-    if (!apiKey) {
-      throw new Error('API key for youdosudoku.com is not configured.')
-    }
+  const apiKey = import.meta.env.VITE_YOUDOSUDOKU_API_KEY
 
+  try {
     const response = await fetch('https://youdosudoku.com/api', {
       method: 'POST',
       headers: {
@@ -799,12 +798,20 @@ export const useGameStore = defineStore('game', () => {
       }),
     })
 
+    const text = await response.text()
+
     if (!response.ok) {
-      throw new Error(`Error fetching sudoku: ${response.statusText}`)
+      alert(`❌ HTTP ${response.status}\n\n${text}`)
+      throw new Error(text)
     }
 
-    return response.json()
+    return JSON.parse(text)
+  } catch (err) {
+    alert(`❌ FETCH FAILED:\n\n${err.message}`)
+    throw err
   }
+}
+
 
   function resetRuntimeState() {
     if (libraryChannel.value) {
